@@ -363,8 +363,14 @@ impl Engine {
     }
 
     pub fn desktop_browse(&self, query: &Query, cursor: usize) -> Result<(Vec<Found>, Option<usize>), String> {
+        self.desktop_browse_ordered(query, cursor, false)
+    }
+
+    pub fn desktop_browse_ordered(&self, query: &Query, cursor: usize, directories_first: bool) -> Result<(Vec<Found>, Option<usize>), String> {
         let (page, early) = self.s.with_names(query.scope.as_deref(), |live| {
-            browsing::desktop_page(live, &self.s.volumes.active(), query, cursor)
+            let external = self.s.volumes.active();
+            if directories_first { browsing::desktop_directories_first(live, &external, query, cursor) }
+            else { browsing::desktop_page(live, &external, query, cursor) }
         })?;
         self.s.index_first(early);
         Ok(page)
@@ -382,7 +388,8 @@ impl Engine {
             return Ok(SearchPage { hits, has_more, total });
         }
         let (page, early) = self.s.with_names(query.scope.as_deref(), |live| {
-            paging::collect(live, &self.s.volumes.active(), query, order, after, limit)
+            let external = self.s.volumes.active();
+            search_pool().install(|| paging::collect(live, &external, query, order, after, limit))
         })?;
         self.s.index_first(early);
         Ok(page)

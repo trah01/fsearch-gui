@@ -16,6 +16,9 @@ struct NativeSearchField: NSViewRepresentable {
         cell.searchButtonCell = nil
         cell.focusRingType = .none
         field.cell = cell
+        field.isEditable = true
+        field.isSelectable = true
+        field.isEnabled = true
         field.delegate = context.coordinator
         field.sendsSearchStringImmediately = true
         field.sendsWholeSearchString = false

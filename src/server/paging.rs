@@ -28,12 +28,12 @@ pub(super) fn run(request: &Value, engine: &Engine) -> Result<Reply, String> {
         return Err("搜索条件已改变，请重新搜索。".into());
     }
     let started = Instant::now();
-    if query.tokens.is_empty() && column == PageColumn::Relevance && !order.directories_first {
+    if query.tokens.is_empty() && column == PageColumn::Relevance {
         let position = match cursor {
             Some(cursor) => cursor.get("position").and_then(Value::as_u64).ok_or("分页位置无效，请重新搜索。")? as usize,
             None => 0,
         };
-        let (hits, next) = engine.desktop_browse(&query, position)?;
+        let (hits, next) = engine.desktop_browse_ordered(&query, position, order.directories_first)?;
         let next = next.map(|position| json!({"key": key, "position": position}));
         return Ok(Reply::DesktopPage(hits, started.elapsed().as_micros() as u64, next, None));
     }

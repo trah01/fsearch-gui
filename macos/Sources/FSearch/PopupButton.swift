@@ -25,6 +25,7 @@ struct PopupButton<Label: View>: View {
     var chevron = true
     var chipActive: Bool?
     var emphasized = false
+    var toolbarControl = false
     @ViewBuilder let label: () -> Label
     @StateObject private var anchor = PopupAnchor()
 
@@ -45,7 +46,7 @@ struct PopupButton<Label: View>: View {
             if let active = chipActive {
                 content
                     .font(.system(size: 12))
-                    .foregroundStyle(emphasized ? .white : AppAppearance.text)
+                    .foregroundStyle(emphasized ? AppAppearance.onAccent : AppAppearance.text)
                     .padding(.horizontal, 11).frame(height: 36)
                     .background {
                         Capsule().fill(emphasized ? AppAppearance.accent
@@ -56,7 +57,7 @@ struct PopupButton<Label: View>: View {
                     .contentShape(Capsule())
             } else { content }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WindowToolbarButtonStyle(compact: toolbarControl))
         .background(PopupAnchorView(anchor: anchor))
     }
     private var content: some View {

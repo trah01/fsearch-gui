@@ -9,8 +9,6 @@ struct SearchView: View {
     @State private var previewURL: URL?
     @State private var showScopeEditor = false
     @State private var scopeDraft = ""
-    @State private var sidebarToggleHovered = false
-    @FocusState private var sidebarToggleFocused: Bool
     @FocusState private var extensionsFocused: Bool
     @AppStorage("FSearch.showSidebar") private var showSidebar = true
     @AppStorage("FSearch.showInspector") private var showInspector = true
@@ -19,45 +17,32 @@ struct SearchView: View {
     var body: some View {
         GeometryReader { geometry in
             HStack(alignment: .top, spacing: 12) {
-                VStack(spacing: 0) {
-                        HStack(spacing: 0) {
-                            sidebarToggle
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.leading, 8).frame(height: AppAppearance.toolbarHeight)
-                        if showSidebar { SearchSidebar(model: model) }
-                        else { Spacer(minLength: 0) }
+                if showSidebar {
+                    SearchSidebar(model: model)
+                        .frame(width: geometry.size.width < 1100 ? 208 : min(260, geometry.size.width * 0.19))
                 }
-                .frame(width: showSidebar ? (geometry.size.width < 1100 ? 208 : min(260, geometry.size.width * 0.19)) : 36)
                 VStack(spacing: 0) {
-                    Color.clear.frame(height: AppAppearance.toolbarHeight)
-                    VStack(spacing: 0) {
-                        searchBar.padding(.top, 12)
-                        filterBar
-                        results
-                        statusBar
-                    }
-                    .background(AppAppearance.panel.opacity(0.45), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    searchBar.padding(.top, 12)
+                    filterBar
+                    results
+                    statusBar
                 }
+                .floatingSurface(radius: 26, shadow: false)
                 .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
                 if showInspector && geometry.size.width >= 1100 {
-                    VStack(spacing: 0) {
-                        windowActions.frame(height: AppAppearance.toolbarHeight)
-                        FileInspector(hit: model.selectedHit, model: model, preview: preview)
-                            .floatingSurface()
-                            .padding(.bottom, 12)
-                    }
-                    .frame(width: geometry.size.width < 1250 ? 264 : min(332, geometry.size.width * 0.23))
+                    FileInspector(hit: model.selectedHit, model: model, preview: preview)
+                        .floatingSurface()
+                        .padding(.bottom, 12)
+                        .frame(width: geometry.size.width < 1250 ? 264 : min(332, geometry.size.width * 0.23))
                 }
             }
             .padding(.leading, 6)
             .padding(.trailing, 14)
+            .padding(.top, 8)
             .padding(.bottom, 2)
-            .overlay(alignment: .topTrailing) {
-                if !showInspector || geometry.size.width < 1100 {
-                    windowActions.padding(.trailing, 20).offset(y: 3)
-                }
-            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { windowActions }
         }
         .background(SearchBackdrop().ignoresSafeArea())
         .foregroundStyle(AppAppearance.text)
@@ -81,31 +66,33 @@ struct SearchView: View {
         Button { showSidebar.toggle() } label: {
             Image(systemName: "sidebar.left").font(.system(size: 14, weight: .regular))
         }
-        .buttonStyle(SidebarToggleStyle(hovered: sidebarToggleHovered, focused: sidebarToggleFocused))
-        .focused($sidebarToggleFocused)
-        .onHover { sidebarToggleHovered = $0 }
+        .buttonStyle(WindowToolbarButtonStyle(active: showSidebar))
         .help(showSidebar ? "隐藏侧边栏" : "显示侧边栏")
         .accessibilityLabel(showSidebar ? "隐藏侧边栏" : "显示侧边栏")
         .keyboardShortcut("s", modifiers: [.control, .command])
     }
 
     private var windowActions: some View {
-        HStack(spacing: 14) {
-            Spacer(minLength: 0)
+        HStack(spacing: 4) {
+            sidebarToggle
             PopupButton(actions: [
                 PopupAction("选择搜索文件夹…", perform: model.chooseFolder),
                 PopupAction("清除筛选", perform: model.resetFilters),
                 .separator,
                 PopupAction("刷新结果", perform: model.search),
                 PopupAction("设置…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
-            ], chevron: false) {
-                Image(systemName: "ellipsis").frame(width: 18, height: 18)
-                    .padding(9).floatingSurface(radius: 14, shadow: false)
-            }.fixedSize().help("更多操作")
-            Button { showInspector.toggle() } label: { Image(systemName: "sidebar.right").frame(width: 24, height: 18) }
-                .help("显示或隐藏文件详情")
+            ], chevron: false, toolbarControl: true) {
+                Image(systemName: "ellipsis")
+            }
+            .fixedSize()
+            .help("更多操作")
+            .accessibilityLabel("更多操作")
+            Button { showInspector.toggle() } label: { Image(systemName: "sidebar.right") }
+                .buttonStyle(WindowToolbarButtonStyle(active: showInspector))
+                .help(showInspector ? "隐藏文件详情" : "显示文件详情")
+                .accessibilityLabel(showInspector ? "隐藏文件详情" : "显示文件详情")
+                .keyboardShortcut("i", modifiers: [.control, .command])
         }
-        .buttonStyle(FloatingButtonStyle(radius: 16))
         .padding(.horizontal, 6)
     }
 
@@ -121,56 +108,31 @@ struct SearchView: View {
         .frame(height: AppAppearance.searchHeight)
         .background(AppAppearance.panel, in: RoundedRectangle(cornerRadius: AppAppearance.searchCorner, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: AppAppearance.searchCorner, style: .continuous)
-            .strokeBorder(AppAppearance.border, lineWidth: 1.2))
+            .strokeBorder(AppAppearance.border, lineWidth: 1.2)
+            .allowsHitTesting(false))
         .shadow(color: AppAppearance.shadow.opacity(0.7), radius: 10, x: 0, y: 4)
         .padding(.horizontal, 18).padding(.bottom, 12)
     }
 
     private var filterBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    filterChoices.fixedSize()
-                    Spacer(minLength: 0)
-                    displayControls.fixedSize()
+        HStack(spacing: 12) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    filterChoices.padding(.vertical, 4)
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        filterChoices.padding(.vertical, 4)
-                    }
-                    HStack {
-                        Spacer(minLength: 0)
-                        displayControls.fixedSize()
-                    }
+                .onChange(of: model.category) { category in
+                    extensionsFocused = category == .custom
+                    if category == .custom { proxy.scrollTo("extensions", anchor: .trailing) }
                 }
             }
-            if model.category == .custom {
-                HStack(spacing: 10) {
-                    Text("后缀").font(.system(size: 12)).foregroundStyle(AppAppearance.muted)
-                    TextField("pdf, docx, xlsx", text: $model.extensions)
-                        .textFieldStyle(.plain).font(.system(size: 12))
-                        .focused($extensionsFocused)
-                        .padding(.horizontal, 12).frame(height: 36)
-                        .background(AppAppearance.secondary, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(extensionsFocused ? AppAppearance.accent : AppAppearance.separator, lineWidth: 1))
-                        .frame(maxWidth: 360)
-                        .accessibilityLabel("文件后缀，多个用逗号分隔")
-                        .onSubmit(model.search)
-                    Spacer(minLength: 0)
-                }
-            }
+            displayControls.fixedSize()
         }
-        .padding(.horizontal, 12).padding(.top, 4).padding(.bottom, 14)
-        .onChange(of: model.category) { category in extensionsFocused = category == .custom }
+        .frame(height: 44)
+        .padding(.horizontal, 12).padding(.bottom, 14)
     }
 
     private var filterChoices: some View {
         HStack(spacing: 8) {
-            PopupButton(actions: FileCategory.allCases.map { category in
-                PopupAction(category.rawValue, selected: model.category == category) { model.category = category }
-            }) { Text(model.category == .all ? "所有类型" : model.category.rawValue) }
-            .filterChip(active: true, emphasized: true)
             scopeButton
             PopupButton(actions: TimeFilter.allCases.map { filter in
                 PopupAction(filter.rawValue, selected: model.timeFilter == filter) { model.timeFilter = filter }
@@ -180,6 +142,23 @@ struct SearchView: View {
                 PopupAction(filter.rawValue, selected: model.sizeFilter == filter) { model.sizeFilter = filter }
             }) { Text(model.sizeFilter == .any ? "大小" : model.sizeFilter == .large ? ">100 MB" : "<1 MB") }
             .filterChip(active: model.sizeFilter != .any)
+            PopupButton(actions: FileCategory.allCases.map { category in
+                PopupAction(category.rawValue, selected: model.category == category) { model.category = category }
+            }) { Text(model.category == .all ? "所有类型" : model.category.rawValue) }
+            .filterChip(active: true, emphasized: true)
+            if model.category == .custom {
+                TextField("pdf, docx, xlsx", text: $model.extensions)
+                    .textFieldStyle(.plain).font(.system(size: 12))
+                    .focused($extensionsFocused)
+                    .padding(.horizontal, 12).frame(width: 190, height: 36)
+                    .background(AppAppearance.secondary, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(extensionsFocused ? AppAppearance.accent : AppAppearance.separator, lineWidth: 1)
+                        .allowsHitTesting(false))
+                    .accessibilityLabel("文件后缀，多个用逗号分隔")
+                    .onSubmit(model.search)
+                    .id("extensions")
+            }
         }
     }
 
@@ -304,23 +283,6 @@ struct SearchView: View {
         }
         .font(.system(size: 11)).foregroundStyle(.secondary).buttonStyle(.borderless)
         .padding(.horizontal, 18).frame(height: 36)
-    }
-}
-
-private struct SidebarToggleStyle: ButtonStyle {
-    let hovered: Bool
-    let focused: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(AppAppearance.text.opacity(configuration.isPressed ? 1 : 0.75))
-            .frame(width: 28, height: 28)
-            .background(configuration.isPressed ? AppAppearance.sidebarSelection
-                : hovered || focused ? AppAppearance.secondary : .clear,
-                in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(focused ? AppAppearance.accent.opacity(0.6) : .clear, lineWidth: 1.5))
-            .contentShape(Rectangle())
     }
 }
 

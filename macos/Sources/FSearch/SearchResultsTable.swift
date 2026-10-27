@@ -366,18 +366,10 @@ private final class ResultCell: NSTableCellView {
         if column == .modified {
             let button = NSButton(image: NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "更多文件操作")!, target: self, action: #selector(showMore(_:)))
             button.translatesAutoresizingMaskIntoConstraints = false
-            button.bezelStyle = .circular
             button.isBordered = false
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 14
-            button.layer?.borderWidth = 1
-            button.layer?.borderColor = AppAppearance.native(0xC3CCE5, 0x596581, alpha: 0.6).cgColor
-            button.layer?.backgroundColor = AppAppearance.native(0xFFFFFF, 0x383F54, alpha: 0.6).cgColor
-            button.contentTintColor = AppAppearance.nativeText
-            if let image = button.image?.withSymbolConfiguration(.init(paletteColors: [AppAppearance.nativeText])) {
-                image.isTemplate = false
-                button.image = image
-            }
+            button.image?.isTemplate = true
+            button.contentTintColor = .labelColor
+            button.toolTip = "更多文件操作"
             button.setAccessibilityLabel("更多文件操作")
             addSubview(button)
             NSLayoutConstraint.activate([

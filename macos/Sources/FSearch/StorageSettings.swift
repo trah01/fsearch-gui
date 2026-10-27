@@ -193,8 +193,8 @@ struct StorageSettingsView: View {
                     Text(permissions.fullAccess == nil ? "尚未检查" : permissions.fullAccess == true ? "已授权" : "未授权").foregroundStyle(.secondary)
                     Button("申请权限", action: permissions.requestFullAccess)
                 }
+                Text("用于读取内置硬盘中的受保护文件夹。").font(.callout).foregroundStyle(.secondary)
                 HStack {
-                    Text("用于读取内置硬盘中的受保护文件夹。").font(.callout).foregroundStyle(.secondary)
                     Spacer()
                     Button("显示应用位置", action: permissions.showApplication)
                     Button("重新载入权限") { Task { await permissions.reload() } }
@@ -238,7 +238,10 @@ struct StorageSettingsView: View {
                                     Text(volume.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                                 Text(volume.status).font(.callout).foregroundStyle(.secondary)
-                                    .frame(width: 160, alignment: .trailing).lineLimit(2)
+                                    .frame(maxWidth: 110, alignment: .trailing).lineLimit(2)
+                            }
+                            HStack {
+                                Spacer()
                                 Button(volume.readable == true ? "已允许访问" : "申请权限") { permissions.requestVolumeAccess(volume) }
                                     .disabled(permissions.busy || volume.readable == true)
                                 Button("重建索引") { Task { await permissions.rebuild(volume) } }
@@ -251,7 +254,7 @@ struct StorageSettingsView: View {
             }
             if let error = permissions.error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
         }
-        .padding(24).frame(width: 760, height: 520)
+        .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppAppearance.background)
         .task {
             await permissions.refresh()

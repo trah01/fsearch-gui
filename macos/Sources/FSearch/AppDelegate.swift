@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        AppearanceSettings.shared.applyAppearance()
         if let icon = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
             NSApp.applicationIconImage = NSImage(contentsOf: icon)
         }

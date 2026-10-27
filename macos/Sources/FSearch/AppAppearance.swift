@@ -11,20 +11,22 @@ enum AppAppearance {
     }
 
     static let background = Color(nsColor: native(0xFFFFFF, 0x1C1C1E))
-    static var secondary: Color { Color(nsColor: native(0xFFFFFF, 0x303547, alpha: surfaceOpacity)) }
-    static var panel: Color { Color(nsColor: native(0xFFFFFF, 0x252A3B, alpha: surfaceOpacity)) }
-    static let text = Color(nsColor: native(0x20263E, 0xEFF2FF))
-    static let muted = Color(nsColor: native(0x7D849E, 0xA3ADC6))
-    static let separator = Color(nsColor: native(0xA6AEC8, 0x73809E, alpha: 0.22))
+    static var secondary: Color { Color(nsColor: native(0xFFFFFF, 0x303030)) }
+    static var panel: Color { Color(nsColor: native(0xFFFFFF, 0x252525)) }
+    static let text = Color(nsColor: native(0x202020, 0xF2F2F2))
+    static let muted = Color(nsColor: native(0x6E6E73, 0xA1A1A6))
+    static let separator = Color(nsColor: native(0xA6A6AB, 0x808085, alpha: 0.22))
     static var accent: Color { Color(nsColor: nativeAccent) }
+    static var onAccent: Color {
+        AppearanceSettings.savedTheme == .white ? Color(nsColor: native(0xFFFFFF, 0x202020)) : .white
+    }
     static var nativeAccent: NSColor {
         let theme = AppearanceSettings.savedTheme
         return native(theme.light, theme.dark)
     }
     static var selection: Color { Color(nsColor: nativeSelection) }
-    static var nativeSelection: NSColor { tinted(0xFFFFFF, 0x252A3B, fraction: 0.27, alpha: 0.85) }
-    static var sidebarSelection: Color { Color(nsColor: tinted(0xECECF4, 0x303547, fraction: 0.12, alpha: 0.8)) }
-    private static var surfaceOpacity: CGFloat { 1 - AppearanceSettings.savedTransparency }
+    static var nativeSelection: NSColor { tinted(0xFFFFFF, 0x252525, fraction: 0.27, alpha: 0.85) }
+    static var sidebarSelection: Color { Color(nsColor: tinted(0xECECEE, 0x303030, fraction: 0.12, alpha: 0.8)) }
 
     static func tinted(_ light: UInt32, _ dark: UInt32, fraction: CGFloat, alpha: CGFloat = 1) -> NSColor {
         NSColor(name: nil) { appearance in
@@ -39,7 +41,7 @@ enum AppAppearance {
         }
     }
     static let border = Color(nsColor: native(0xDADCE0, 0x48484A))
-    static let shadow = Color(nsColor: native(0x65749F, 0x050815, alpha: 0.13))
+    static let shadow = Color(nsColor: native(0x000000, 0x000000, alpha: 0.13))
     static let corner: CGFloat = 22
     static let searchHeight: CGFloat = 48
     static let searchCorner: CGFloat = 16
@@ -47,10 +49,9 @@ enum AppAppearance {
     static let sidebarFontSize: CGFloat = 12
     static let sidebarRowHeight: CGFloat = 32
     static let rowHeight: CGFloat = 54
-    static let toolbarHeight: CGFloat = 40
-    static let rowAlternate = native(0xDDE0EB, 0x34394A, alpha: 0.22)
-    static let nativeText = native(0x20263E, 0xEFF2FF)
-    static let nativeMuted = native(0x7D849E, 0xA3ADC6)
+    static let rowAlternate = native(0xE5E5EA, 0x2C2C2E, alpha: 0.22)
+    static let nativeText = native(0x202020, 0xF2F2F2)
+    static let nativeMuted = native(0x6E6E73, 0xA1A1A6)
 }
 
 struct SearchBackdrop: View {
@@ -63,7 +64,8 @@ extension View {
     func floatingSurface(radius: CGFloat = AppAppearance.corner, shadow: Bool = true) -> some View {
         self.background(AppAppearance.panel, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(AppAppearance.border, lineWidth: 1))
+                .strokeBorder(AppAppearance.border, lineWidth: 1)
+                .allowsHitTesting(false))
             .shadow(color: shadow ? AppAppearance.shadow : .clear, radius: 16, x: 0, y: 7)
     }
 }
@@ -74,7 +76,7 @@ struct FloatingButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(prominent ? .white : AppAppearance.text)
+            .foregroundStyle(prominent ? AppAppearance.onAccent : AppAppearance.text)
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)

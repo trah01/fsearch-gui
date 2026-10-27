@@ -6,7 +6,7 @@ mod storage;
 
 use fsearch::{index, live, query};
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -131,9 +131,20 @@ fn stdio() {
         let _ = up.shutdown(std::net::Shutdown::Write);
     });
     let mut out = std::io::stdout().lock();
-    // Forward as bytes arrive: a full desktop result can be hundreds of MB.
-    // Buffering a complete line here duplicated it before the UI could read it.
-    let _ = std::io::copy(&mut &s, &mut out);
+    // Stdout is line-buffered, but binary frames need not end in a newline.
+    // Flush every forwarded chunk so a frame's final bytes cannot wait for
+    // the next request while the desktop is waiting to finish this one.
+    let mut input = &s;
+    let mut buffer = [0u8; 65536];
+    loop {
+        let count = match input.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        };
+        if out.write_all(&buffer[..count]).and_then(|_| out.flush()).is_err() { break }
+    }
 }
 
 /// A desktop update must not silently keep using a daemon that predates
@@ -146,7 +157,7 @@ fn desktop_stdio() {
         let mut line = String::new();
         BufReader::new(stream).read_line(&mut line)?;
         let value: serde_json::Value = serde_json::from_str(&line)?;
-        Ok(value["storage_revision"] == 3 && value["desktop_binary_results"] == 1 && value["desktop_paged_results"] == 1)
+        Ok(value["storage_revision"] == 3 && value["desktop_binary_results"] == 1 && value["desktop_paged_results"] == 2)
     })().unwrap_or(false);
     if !supported {
         server::stop(&data_dir()).unwrap_or_else(|e| die(&e));

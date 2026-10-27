@@ -55,7 +55,6 @@ struct SearchSidebar: View {
             .padding(.leading, 12).padding(.trailing, 22).padding(.vertical, 4)
         }
         .padding(.vertical, 8)
-        .floatingSurface(shadow: false)
         .padding(.bottom, 2)
         .onAppear(perform: refreshVolumes)
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in refreshVolumes() }

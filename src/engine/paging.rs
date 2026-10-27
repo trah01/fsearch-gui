@@ -264,6 +264,46 @@ mod tests {
     }
 
     #[test]
+    fn directory_browse_preserves_all_filters_across_pages() {
+        let mut live = fixture();
+        for (path, kind) in [(b"/h/overlay-dir".as_slice(), 1), (b"/h/alias.app".as_slice(), 2)] {
+            let entry = crate::live::OEnt::new(path, kind, 20, 8);
+            live.over.insert(path.to_vec(), entry);
+            live.flat.items.push((path.to_vec(), entry));
+            live.flat.masks.push(entry.mask);
+        }
+        let base = Query::parse("", "/h").unwrap();
+        let mut queries = vec![base.clone()];
+        for (key, value) in [("type", "app"), ("kind", "file"), ("kind", "dir"), ("ext", "txt")] {
+            let mut query = base.clone();
+            query.filter(key, value, "/h").unwrap();
+            queries.push(query);
+        }
+        let mut metadata = base.clone();
+        metadata.size = (15, 25);
+        metadata.mtime = (7, u32::MAX);
+        queries.push(metadata);
+        for mut query in queries {
+            let mut expected = browsing::all(&live, &[], &query);
+            expected.sort_by_key(|hit| hit.kind & 3 != KIND_DIR);
+            query.limit = 2;
+            let mut actual = Vec::new();
+            let mut cursor = 0;
+            let mut previous_cursor = None;
+            loop {
+                let (hits, next) = browsing::desktop_directories_first(&live, &[], &query, cursor);
+                assert!(hits.len() <= 2);
+                actual.extend(hits);
+                let Some(next) = next else { break };
+                assert_ne!(Some(next), previous_cursor);
+                previous_cursor = Some(next);
+                cursor = next;
+            }
+            assert_eq!(actual.iter().map(|hit| &hit.path).collect::<Vec<_>>(), expected.iter().map(|hit| &hit.path).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
     fn real_index_pages_are_bounded() {
         let Some(path) = std::env::var_os("FSEARCH_BENCH_INDEX") else { return };
         let live = Live::lazy(Index::load(Path::new(&path)).expect("read-only real index"));
@@ -277,6 +317,23 @@ mod tests {
         assert_eq!(second.len(), 3000);
         let paths: std::collections::HashSet<_> = first.iter().map(|hit| &hit.path).collect();
         assert!(second.iter().all(|hit| !paths.contains(&hit.path)));
+        for (label, filter) in [("large", Some(("size", ">100MB"))), ("small", Some(("size", "<1MB"))),
+                                ("week", Some(("mtime", "<7d"))), ("month", Some(("mtime", "<30d"))), ("all", None)] {
+            let mut query = query.clone();
+            if let Some((key, value)) = filter {
+                query.filter(key, value, "/").unwrap();
+                if key == "size" { query.filter("kind", "file", "/").unwrap(); }
+            }
+            for directories_first in [false, true] {
+                let started = Instant::now();
+                let (hits, _) = if directories_first { browsing::desktop_directories_first(&live, &[], &query, 0) }
+                    else { browsing::desktop_page(&live, &[], &query, 0) };
+                println!("browse {label}, dirs={directories_first}, page={}, elapsed_us={}", hits.len(), started.elapsed().as_micros());
+                assert!(hits.len() <= 3000);
+                assert!(hits.iter().all(|hit| query.match_path(hit.path.as_os_str().as_bytes(), hit.kind, hit.size, hit.mtime).is_some()));
+                if directories_first && query.kind_ok(KIND_DIR) { assert!(hits.iter().all(|hit| hit.kind & 3 == KIND_DIR)); }
+            }
+        }
         for (label, column) in [("size", PageColumn::Size), ("modified", PageColumn::Modified),
                                 ("name", PageColumn::Name), ("path", PageColumn::Path), ("kind", PageColumn::Kind)] {
             let started = Instant::now();

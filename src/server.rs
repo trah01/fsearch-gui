@@ -242,7 +242,7 @@ fn run(v: &Value, cx: &Ctx) -> Result<Reply, String> {
         || (op == "search"
             && v.get("q").and_then(Value::as_str).is_some_and(|q| ["grep:", "regex:", "sym:", "content:", "symbol:"].iter().any(|k| q.contains(k))));
     match op {
-        "ping" => Ok(Reply::Value(json!({"ok": true, "desktop_storage": true, "storage_revision": 3, "desktop_search_all": true, "desktop_compact_results": true, "desktop_binary_results": 1, "desktop_paged_results": 1}))),
+        "ping" => Ok(Reply::Value(json!({"ok": true, "desktop_storage": true, "storage_revision": 3, "desktop_search_all": true, "desktop_compact_results": true, "desktop_binary_results": 1, "desktop_paged_results": 2}))),
         "search-page" => paging::run(v, engine),
         "search-all" => {
             let (q, selectors) = parse_request(v, engine.home())?;
