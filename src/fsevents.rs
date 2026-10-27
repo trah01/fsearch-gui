@@ -106,7 +106,15 @@ extern "C" fn on_events(_s: *mut c_void, info: *mut c_void, n: usize, paths: *mu
     let paths = paths as *const *const i8;
     let batch = (0..n)
         .map(|i| unsafe {
-            Event { path: CStr::from_ptr(*paths.add(i)).to_bytes().to_vec(), flags: *flags.add(i), id: *ids.add(i), stream: info.stream }
+            let path = CStr::from_ptr(*paths.add(i)).to_bytes().to_vec();
+            let flags = *flags.add(i);
+            // Mount/unmount events must reconcile the parent as well, so
+            // removed disks disappear and newly connected disks get scanned.
+            if flags & (0x40 | 0x80) != 0 && crate::walk::external_volume(&path) {
+                Event { path: b"/Volumes".to_vec(), flags: flags | MUST_SCAN_SUBDIRS, id: *ids.add(i), stream: info.stream }
+            } else {
+                Event { path, flags, id: *ids.add(i), stream: info.stream }
+            }
         })
         .collect();
     let _ = info.tx.send(batch);

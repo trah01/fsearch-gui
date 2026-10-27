@@ -575,6 +575,15 @@ impl Query {
             "ext" => self.exts.extend(v.split(',').map(|e| e.trim_start_matches('.').to_ascii_lowercase().into_bytes())),
             "type" => {
                 for t in v.split(',') {
+                    if t == "other" {
+                        self.kind = Some(KIND_FILE);
+                        self.not_exts.extend(
+                            TYPES.iter().filter(|(name, _)| matches!(*name, "image" | "video" | "audio" | "doc"))
+                                .flat_map(|(_, exts)| exts.iter().map(|ext| ext.as_bytes().to_vec())),
+                        );
+                        self.not_exts.push(b"app".to_vec());
+                        continue;
+                    }
                     if t == "app" {
                         self.kind = Some(KIND_DIR);
                         self.apps = true;

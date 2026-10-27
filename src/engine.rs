@@ -16,6 +16,9 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex, RwLock, RwLockReadGuard};
 use std::time::{Duration, Instant};
 
+mod maintenance;
+mod browsing;
+
 // Every search scans the whole overlay (~1 ms per 100k entries), and a
 // follower starting up replays everything since the save, so fold it into
 // the base once it grows: ~1 s of CPU and a ~280 MB write, about hourly on a
@@ -86,6 +89,8 @@ pub struct Engine {
 }
 
 struct Shared {
+    volumes: crate::volumes::VolumeIndexes,
+    maintenance: maintenance::Maintenance,
     live: RwLock<Option<Live>>,
     /// A saved index is still being read in: searches wait for it rather
     /// than answer "indexing".
@@ -256,6 +261,8 @@ impl Engine {
         let content = if owner { Content::open(dir.join("content")) } else { Content::open_shared(dir.join("content")) };
         let content_ready = AtomicBool::new(!owner || !content.segs.is_empty());
         let shared = Arc::new(Shared {
+            volumes: crate::volumes::VolumeIndexes::new(&dir, &opts.home)?,
+            maintenance: maintenance::Maintenance::default(),
             live: RwLock::new(None),
             loading: (Mutex::new(loading.is_some()), Condvar::new()),
             content: RwLock::new(content),
@@ -316,6 +323,10 @@ impl Engine {
                     }
                 },
             };
+            let mut live = live;
+            // Migrate earlier app indexes that mixed all external disks into
+            // the internal index. Only explicit per-disk indexes now serve them.
+            live.remove_path(b"/Volumes");
             *s.live.write().unwrap() = Some(live);
             s.early.lock().unwrap().clear();
             *s.loading.0.lock().unwrap() = false;
@@ -339,6 +350,24 @@ impl Engine {
         &self.s.home
     }
 
+    /// Enumerate all indexed entries without the ranked-search paging limit.
+    pub fn browse(&self, query: &Query, cursor: usize) -> Result<(Vec<Found>, Option<usize>), String> {
+        let (page, early) = self.s.with_names(query.scope.as_deref(), |live| {
+            browsing::page(live, &self.s.volumes.active(), query, cursor)
+        })?;
+        self.s.index_first(early);
+        Ok(page)
+    }
+
+    /// Desktop lists include every matching entry in one response.
+    pub fn search_all(&self, query: &Query) -> Result<Vec<Found>, String> {
+        let (hits, early) = self.s.with_names(query.scope.as_deref(), |live| {
+            browsing::all(live, &self.s.volumes.active(), query)
+        })?;
+        self.s.index_first(early);
+        Ok(hits)
+    }
+
     /// Keep the cores clocked up for `d` from now. After ~20 ms idle macOS
     /// slows them down, and a search then runs 3-6x slower while they ramp
     /// back up; one spinning thread keeps them up, so the next keystroke's
@@ -358,7 +387,7 @@ impl Engine {
     /// Name search.
     pub fn search(&self, q: &Query) -> Result<Vec<Found>, String> {
         WARM_UNTIL.store(0, Ordering::Relaxed);
-        let (found, early) = self.s.with_names(q.scope.as_deref(), |live| {
+        let (mut found, early) = self.s.with_names(q.scope.as_deref(), |live| {
             let mut p = Vec::new();
             search_pool()
                 .install(|| Searcher { live }.search(q))
@@ -378,9 +407,12 @@ impl Engine {
                     };
                     Found { path: PathBuf::from(std::ffi::OsStr::from_bytes(&p)), kind, size, mtime, score: h.score }
                 })
-                .collect()
+                .collect::<Vec<_>>()
         })?;
         self.s.index_first(early);
+        found.extend(self.s.volumes.search(q));
+        found.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
+        found.truncate(q.limit);
         Ok(found)
     }
 
@@ -388,6 +420,9 @@ impl Engine {
     /// The bool says whether the content index answered (false: files were
     /// picked from the name index and read, for folders it doesn't cover).
     pub fn grep(&self, q: &Query, g: &Grep) -> Result<(GrepResult, bool), String> {
+        if q.scope.as_ref().is_some_and(|s| s == b"/Volumes" || s.starts_with(b"/Volumes/")) {
+            return Ok((content::verify(g, &self.s.volumes.content_paths(q), q.limit), false));
+        }
         WARM_UNTIL.store(0, Ordering::Relaxed);
         let home = self.s.home.as_bytes();
         let indexed = q.scope.as_ref().is_none_or(|s| content::in_scope(s, home));
@@ -455,6 +490,19 @@ impl Engine {
         self.s.save_requested.store(true, Ordering::Relaxed);
         let _ = self.s.wake.send(Vec::new());
     }
+
+    pub fn external_storage_status(&self) -> Vec<serde_json::Value> { self.s.volumes.status() }
+
+    pub fn check_volume_access(&self, path: &Path) -> Result<(), String> { self.s.volumes.check_access(path) }
+
+    pub fn rebuild_external_index(&self, path: &Path) -> Result<(), String> {
+        if !self.s.owner() { return Err("请重新载入搜索引擎后再重建索引。".into()); }
+        self.s.volumes.rebuild(path)
+    }
+
+    pub fn rebuild_internal_index(&self) -> Result<(), String> { self.s.maintenance.request(&self.s) }
+
+    pub fn internal_index_status(&self) -> serde_json::Value { self.s.maintenance.status() }
 
     /// Have `f` told the folders each batch of disk changes touched (true:
     /// and maybe anything below them), as the batch is applied (on the
@@ -1061,6 +1109,7 @@ fn apply_loop(shared: &Arc<Shared>, rx: Receiver<Vec<fsevents::Event>>) {
             Err(RecvTimeoutError::Disconnected) => return,
         };
         events.extend(rx.try_iter().flatten());
+        maintenance::run(shared);
         // The owner wrote the index files: a follower picks that up now
         // rather than at its next periodic check.
         let owner_wrote = events.iter().any(|e| under(&e.path, ours));

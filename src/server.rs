@@ -113,6 +113,7 @@ fn handle(mut conn: UnixStream, cx: &Ctx) {
         if conn.write_all(&out).is_err() {
             return;
         }
+        if out.capacity() > 8 * 1024 * 1024 { out = Vec::new(); }
         if waiting(&conn) {
             cx.engine.keep_warm(WARM);
         }
@@ -150,6 +151,9 @@ fn respond(line: &str, cx: &Ctx, out: &mut Vec<u8>) {
                 .collect();
             put(out, &Hits { hits, id, next, ok: true, took_us })
         }
+        Ok(Reply::DesktopHits(found, took_us)) => {
+            put(out, &DesktopHits { entries: DesktopRows(&found), types: DESKTOP_TYPES, id, ok: true, took_us });
+        }
         Ok(Reply::Value(mut r)) => {
             r["id"] = id.clone();
             put(out, &r)
@@ -165,10 +169,55 @@ fn put(out: &mut Vec<u8>, v: &impl serde::Serialize) {
 
 enum Reply {
     Value(Value),
+    DesktopHits(Vec<Found>, u64),
     /// Name-search results, the search's own time (µs), for a paged request
     /// where the next page starts, and whether to give each hit's git
     /// status: the hot path, written straight from the results.
     Hits(Vec<Found>, u64, Option<usize>, bool),
+}
+
+#[derive(serde::Serialize)]
+struct DesktopHits<'a> {
+    entries: DesktopRows<'a>,
+    types: &'static [&'static str],
+    id: &'a Value,
+    ok: bool,
+    took_us: u64,
+}
+
+/// Keep the desktop transfer as standard JSON without repeating keys for
+/// millions of rows or allocating another collection of row dictionaries.
+struct DesktopRows<'a>(&'a [Found]);
+
+const DESKTOP_TYPES: &[&str] = &["audio", "archive", "doc", "app", "other", "image", "video"];
+
+impl serde::Serialize for DesktopRows<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let filters: Vec<Query> = DESKTOP_TYPES.iter().map(|name| {
+            let mut query = Query::parse("", "").expect("empty query");
+            query.filter("type", name, "").expect("desktop file type");
+            if !matches!(*name, "app" | "other") { query.filter("kind", "file", "").expect("file kind"); }
+            query
+        }).collect();
+        let mut classifications = std::collections::HashMap::new();
+        let mut rows = serializer.serialize_seq(Some(self.0.len()))?;
+        for hit in self.0 {
+            let path = hit.path.as_os_str().as_bytes();
+            let extension = path.iter().rposition(|&b| b == b'.' || b == b'/')
+                .filter(|&i| path[i] == b'.').map(|i| path[i..].to_ascii_lowercase()).unwrap_or_default();
+            let kind = hit.kind & 3;
+            // Classification depends only on extension and file kind. Reuse
+            // the engine's existing type rules once per distinct pair.
+            let mask = *classifications.entry((kind, extension)).or_insert_with(|| {
+                filters.iter().enumerate().fold(0u8, |mask, (i, query)| {
+                    mask | if query.match_path(path, kind, 0, 0).is_some() { 1 << i } else { 0 }
+                })
+            });
+            rows.serialize_element(&(hit.path.to_string_lossy(), kind, hit.size, hit.mtime, mask))?;
+        }
+        rows.end()
+    }
 }
 
 /// The JSON of a name-search answer. Keys in sorted order, the order every
@@ -201,7 +250,51 @@ fn run(v: &Value, cx: &Ctx) -> Result<Reply, String> {
         || (op == "search"
             && v.get("q").and_then(Value::as_str).is_some_and(|q| ["grep:", "regex:", "sym:", "content:", "symbol:"].iter().any(|k| q.contains(k))));
     match op {
-        "ping" => Ok(Reply::Value(json!({"ok": true}))),
+        "ping" => Ok(Reply::Value(json!({"ok": true, "desktop_storage": true, "storage_revision": 3, "desktop_search_all": true, "desktop_compact_results": true}))),
+        "search-all" => {
+            let (q, selectors) = parse_request(v, engine.home())?;
+            if q.grep.is_some() {
+                return Err("请输入文件名，桌面搜索不支持搜索文件内容。".into());
+            }
+            if !selectors.is_empty() {
+                return Err("桌面搜索不支持 Git 状态筛选。".into());
+            }
+            let started = Instant::now();
+            let hits = engine.search_all(&q)?;
+            let took_us = started.elapsed().as_micros() as u64;
+            if v.get("format").and_then(Value::as_str) == Some("compact") {
+                Ok(Reply::DesktopHits(hits, took_us))
+            } else {
+                Ok(Reply::Hits(hits, took_us, None, false))
+            }
+        }
+        "browse" => {
+            let (q, selectors) = parse_request(v, engine.home())?;
+            if !q.tokens.is_empty() || q.grep.is_some() || !selectors.is_empty() {
+                return Err("索引浏览用于未输入搜索词时的文件列表。".into());
+            }
+            let cursor = v.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let started = Instant::now();
+            let (hits, next) = engine.browse(&q, cursor)?;
+            Ok(Reply::Hits(hits, started.elapsed().as_micros() as u64, next, false))
+        }
+        "storage" => Ok(Reply::Value(crate::storage::status(engine))),
+        "storage-access" => {
+            let path = v.get("path").and_then(Value::as_str).ok_or("请选择磁盘。")?;
+            engine.check_volume_access(Path::new(path))?;
+            Ok(Reply::Value(json!({"ok": true, "readable": true})))
+        }
+        "rebuild-index" => {
+            match v.get("target").and_then(Value::as_str) {
+                Some("internal") => engine.rebuild_internal_index()?,
+                Some("external") => {
+                    let path = v.get("path").and_then(Value::as_str).ok_or("请选择磁盘。")?;
+                    engine.rebuild_external_index(Path::new(path))?;
+                }
+                _ => return Err("请选择要重建索引的磁盘。".into()),
+            }
+            Ok(Reply::Value(json!({"ok": true, "scheduled": true})))
+        }
         "save" => {
             engine.save();
             Ok(Reply::Value(json!({"ok": true, "scheduled": true})))
@@ -844,6 +937,20 @@ fn grep(v: &Value, cx: &Ctx) -> Result<Value, String> {
                 m
             });
             let mut j = json!({"path": String::from_utf8_lossy(&f.path), "matches": matches.collect::<Vec<_>>()});
+            // Content hits use the same file metadata fields as name hits.
+            // Only matched files are inspected, never the whole candidate set.
+            if let Ok(metadata) = std::fs::metadata(std::ffi::OsStr::from_bytes(&f.path)) {
+                use std::os::unix::fs::MetadataExt;
+                j["kind"] = "file".into();
+                j["size"] = metadata.len().into();
+                j["mtime"] = metadata.mtime().max(0).into();
+                if let Ok(created) = metadata
+                    .created()
+                    .and_then(|date| date.duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other))
+                {
+                    j["created"] = created.as_secs().into();
+                }
+            }
             if let Some(w) = x.annotate.then(|| cx.git.status(&f.path).and_then(git::word)).flatten() {
                 j["git"] = w.into();
             }

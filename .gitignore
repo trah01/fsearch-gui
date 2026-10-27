@@ -1,4 +1,7 @@
 target/
+build/
+macos/.build/
+macos/.swiftpm/
 .probe/
 .livetest/
 .replaytest/

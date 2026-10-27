@@ -4,6 +4,27 @@ Whole-disk file search for macOS: names in about 0.1 ms, typo-tolerant,
 plus indexed search inside files. A CLI with a small daemon, a Rust crate,
 or an MCP server for coding agents.
 
+## macOS 图形界面
+
+需要 macOS 13 或更新版本、Rust 和 Xcode Command Line Tools。在项目目录运行：
+
+```sh
+bash scripts/build-app.sh
+open build/FSearch.app
+```
+
+窗口支持限定文件夹范围、即时搜索及格式分类。位置栏可直接输入或粘贴文件夹路径（支持 `~`），也可点击“选择…”选择文件夹；清空后搜索所有位置。
+选择“自定义后缀”后输入 `pdf, docx, xlsx`，可同时筛选多个后缀，也支持 `.pdf` 写法。
+“可执行文件”按常见后缀筛选应用和脚本（如 app、exe、sh、command），不按 Unix 执行权限筛选无后缀文件。
+
+双击文件打开，右键可在访达中显示或复制路径。
+文件名搜索一次加载全部匹配项，底部显示总数；未输入搜索词时按索引顺序浏览全部已索引文件。切换分类复用当前搜索数据；“更多操作 → 刷新结果”重新读取索引中的最新记录。列表使用原生表格按可见行绘制，仅对可见行计算显示文字，排序和目录优先对全部结果生效。选中文件后按空格快速查看，`⌘F` 聚焦搜索框，`⌘O` 选择文件夹，`⌘,` 打开设置。
+首次使用需要建立索引，若提示索引尚未就绪，稍后点击“重试”。
+界面与命令行共用索引。“设置”（`⌘,`）可检查完全磁盘访问权限以及各磁盘的读取和索引状态。
+内置硬盘的受保护文件夹需要在系统设置的“隐私与安全性 → 完全磁盘访问权限”中添加并启用 FSearch，然后点击“重新载入权限”。“内置硬盘”旁的“重建索引”重新扫描内置存储，保留其他磁盘的索引。
+每块外置磁盘通过各自的“申请权限”选择并授权根目录，再点击该磁盘旁的“重建索引”。索引按磁盘单独保存，重建完成后参与搜索，后续通过该按钮更新。磁盘断开时不返回其结果，重新连接原磁盘后恢复使用已保存的索引。
+搜索控件位于标题栏下方，使用不透明背景。关闭搜索窗口后，点击 Dock 图标可重新打开。
+
 ```
 cargo build --release && ./target/release/fsearch install   # -> ~/.local/bin/fsearch
 fsearch fsearch main              # find files by name

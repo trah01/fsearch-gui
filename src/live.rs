@@ -196,7 +196,7 @@ impl Live {
         self.base.lookup(path).filter(|&e| !self.is_dead(e))
     }
 
-    fn remove_path(&mut self, path: &[u8]) {
+    pub(crate) fn remove_path(&mut self, path: &[u8]) {
         self.trees.push(path.to_vec());
         if let Some(e) = self.base_alive(path) {
             self.kill_subtree(e);

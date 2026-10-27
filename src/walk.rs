@@ -2,7 +2,8 @@
 //!
 //! One syscall returns hundreds of entries with name, type, size, mtime and
 //! flags already attached, so there is no per-file stat. Directories fan out
-//! over a rayon pool; mount points are not crossed, firmlinks are (that is
+//! over a rayon pool; mounted disks under /Volumes are included when access
+//! permits, other mount points are not crossed. Firmlinks are (that is
 //! how /Users etc. on the data volume appear under / exactly once).
 
 use rayon::Scope;
@@ -59,6 +60,9 @@ pub fn yield_to_searches() {
 }
 
 pub fn blocked(path: &[u8]) -> bool {
+    if path == b"/Volumes" || path.starts_with(b"/Volumes/") {
+        return true;
+    }
     SKIP.get().is_some_and(|v| v.iter().any(|s| path.starts_with(s) && (path.len() == s.len() || path[s.len()] == b'/')))
 }
 
@@ -104,6 +108,7 @@ struct Ctx {
     out: Vec<Mutex<Vec<Listing>>>,
     /// The whole-disk crawl: counts LISTED, yields to searches.
     disk: bool,
+    external: bool,
 }
 
 thread_local! {
@@ -112,19 +117,24 @@ thread_local! {
 
 /// Scan `root` recursively. Listing id 0 is `root` itself.
 pub fn scan(root: &[u8], threads: usize) -> Vec<Listing> {
-    scan_with(root, threads, false)
+    scan_with(root, threads, false, false)
+}
+
+/// Only an explicit per-disk rebuild may scan the contents of an external disk.
+pub fn scan_external(root: &[u8], threads: usize) -> Vec<Listing> {
+    scan_with(root, threads, false, true)
 }
 
 /// The first run's crawl of the whole disk (see `LISTED`, `HOLD`).
 pub fn scan_disk(threads: usize) -> Vec<Listing> {
-    scan_with(b"/", threads, true)
+    scan_with(b"/", threads, true, false)
 }
 
-fn scan_with(root: &[u8], threads: usize, disk: bool) -> Vec<Listing> {
+fn scan_with(root: &[u8], threads: usize, disk: bool, external: bool) -> Vec<Listing> {
     raise_fd_limit();
-    let fd = if blocked(root) { -1 } else { CString::new(root).map_or(-1, |c| unsafe { libc::open(c.as_ptr(), OPEN_DIR) }) };
+    let fd = if blocked_scan(root, external) { -1 } else { CString::new(root).map_or(-1, |c| unsafe { libc::open(c.as_ptr(), OPEN_DIR) }) };
     // Paths are only tracked when there is something to skip.
-    let path = SKIP.get().is_some_and(|v| !v.is_empty()).then(|| root.to_vec());
+    let path = if external { Some(root.to_vec()) } else { tracked_path(root) };
     let mut l = Listing { id: 0, names: Vec::new(), ents: Vec::new() };
     if fd >= 0 {
         if disk {
@@ -147,7 +157,7 @@ fn scan_with(root: &[u8], threads: usize, disk: bool) -> Vec<Listing> {
         return vec![l];
     }
     let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).start_handler(|_| crate::no_materialize()).build().unwrap();
-    let ctx = Ctx { next_id: AtomicU32::new(1), out: (0..threads + 1).map(|_| Mutex::new(Vec::new())).collect(), disk };
+    let ctx = Ctx { next_id: AtomicU32::new(1), out: (0..threads + 1).map(|_| Mutex::new(Vec::new())).collect(), disk, external };
     pool.scope(|s| descend(s, fd, path, l, &ctx));
     let parts: Vec<Vec<Listing>> = ctx.out.into_iter().map(|m| m.into_inner().unwrap()).collect();
     let mut out = Vec::with_capacity(parts.iter().map(Vec::len).sum());
@@ -226,8 +236,11 @@ fn descend<'s>(s: &Scope<'s>, fd: i32, path: Option<Vec<u8>>, mut l: Listing, ct
         e.kind &= !MAYBE_EMPTY;
         if e.kind & 3 == KIND_DIR && e.kind & FLAG_MOUNT == 0 {
             let name = &l.names[e.name_off as usize..e.name_off as usize + e.name_len as usize];
-            let child_path = path.as_ref().map(|p| crate::live::join(p, name));
-            if child_path.as_deref().is_some_and(blocked) {
+            let child_path = path.as_ref().and_then(|p| {
+                let child = crate::live::join(p, name);
+                if ctx.external { Some(child) } else { tracked_path(&child) }
+            });
+            if child_path.as_deref().is_some_and(|p| blocked_scan(p, ctx.external)) {
                 continue;
             }
             e.child = ctx.next_id.fetch_add(1, Ordering::Relaxed);
@@ -258,6 +271,25 @@ fn descend<'s>(s: &Scope<'s>, fd: i32, path: Option<Vec<u8>>, mut l: Listing, ct
             finish_dir(s, fd, child_path, cid, ctx);
         });
     }
+}
+
+/// Only user-visible disk roots may cross a mount boundary. In particular,
+/// /System/Volumes/Data, /dev and nested mounts retain their old behavior.
+pub fn external_volume(path: &[u8]) -> bool {
+    path.strip_prefix(b"/Volumes/").is_some_and(|name| !name.is_empty() && !name.contains(&b'/'))
+}
+
+fn tracked_path(path: &[u8]) -> Option<Vec<u8>> {
+    (SKIP.get().is_some_and(|v| !v.is_empty()) || path == b"/" || path == b"/Volumes").then(|| path.to_vec())
+}
+
+fn blocked_scan(path: &[u8], external: bool) -> bool {
+    if external && path.starts_with(b"/Volumes/") {
+        return SKIP.get().is_some_and(|v| v.iter().filter(|s| s.as_slice() != b"/Volumes").any(|s| {
+            path.starts_with(s) && (path.len() == s.len() || path[s.len()] == b'/')
+        }));
+    }
+    blocked(path)
 }
 
 /// Entries in the directory `name` (in `dir`) resolves to.

@@ -2,6 +2,7 @@ mod frecency;
 mod git;
 mod mcp;
 mod server;
+mod storage;
 
 use fsearch::{index, live, query};
 
@@ -19,6 +20,7 @@ const USAGE: &str = "usage:
   fsearch mcp                   MCP server on stdin/stdout, for coding agents
   fsearch serve                 run the daemon in the foreground
   fsearch status
+  fsearch restart                reload the daemon and its storage permissions
   fsearch install [--login]      copy to ~/.local/bin; --login also starts the daemon at login
                                 (needs Full Disk Access granted to ~/.local/bin/fsearch)
   fsearch uninstall             remove the login agent (keeps the index)
@@ -53,6 +55,11 @@ fn main() {
             server::serve(data_dir(), home())
         }
         Some("stdio") => stdio(),
+        Some("desktop-stdio") => desktop_stdio(),
+        Some("restart") => {
+            server::stop(&data_dir()).unwrap_or_else(|e| die(&e));
+            server::connect(&data_dir()).unwrap_or_else(|e| die(&format!("cannot restart daemon: {e}")));
+        }
         Some("mcp") => mcp::run(data_dir()),
         Some("status") => print_one(&serde_json::json!({"op": "status"}), true),
         Some("bench") => bench(&args[1..].join(" ")),
@@ -124,12 +131,27 @@ fn stdio() {
         let _ = up.shutdown(std::net::Shutdown::Write);
     });
     let mut out = std::io::stdout().lock();
-    for line in BufReader::new(s).lines() {
-        let Ok(line) = line else { break };
-        if writeln!(out, "{line}").and_then(|_| out.flush()).is_err() {
-            break;
-        }
+    // Forward as bytes arrive: a full desktop result can be hundreds of MB.
+    // Buffering a complete line here duplicated it before the UI could read it.
+    let _ = std::io::copy(&mut &s, &mut out);
+}
+
+/// A desktop update must not silently keep using a daemon that predates
+/// desktop support. Ordinary clients keep their existing startup behavior.
+fn desktop_stdio() {
+    let supported = (|| -> std::io::Result<bool> {
+        let mut stream = server::connect(&data_dir())?;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+        stream.write_all(b"{\"op\":\"ping\"}\n")?;
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line)?;
+        let value: serde_json::Value = serde_json::from_str(&line)?;
+        Ok(value["storage_revision"] == 3 && value["desktop_compact_results"] == true)
+    })().unwrap_or(false);
+    if !supported {
+        server::stop(&data_dir()).unwrap_or_else(|e| die(&e));
     }
+    stdio();
 }
 
 fn bench(qs: &str) {
