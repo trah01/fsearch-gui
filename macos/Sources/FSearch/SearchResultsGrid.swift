@@ -14,6 +14,7 @@ struct SearchResultsGrid: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 132, maximum: 180), spacing: 12)], spacing: 12) {
                         ForEach(model.hits) { hit in
                             FileGridItem(hit: hit, selected: model.selected == hit.path)
+                                .onAppear { model.loadMoreIfNeeded(lastVisibleRow: model.row(for: hit.path) ?? -1) }
                                 .onTapGesture(count: 2) { model.selected = hit.path; model.open(hit) }
                                 .onTapGesture { model.selected = hit.path }
                                 .contextMenu {

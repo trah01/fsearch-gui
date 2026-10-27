@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 enum FileCategory: String, CaseIterable, Identifiable {
     case all = "全部", audio = "音频", archive = "压缩文件", document = "文档"
@@ -26,13 +27,19 @@ enum FileCategory: String, CaseIterable, Identifiable {
 final class SearchModel: ObservableObject {
     @Published var query = "" { didSet { schedule() } }
     @Published var scope = "" { didSet { schedule() } }
-    @Published var category: FileCategory = .all { didSet { schedule() } }
+    @Published var category: FileCategory = .all { didSet { if category != oldValue { schedule(immediate: true) } } }
     @Published var extensions = "" { didSet { schedule() } }
     @Published var timeFilter: TimeFilter = .any { didSet { schedule() } }
     @Published var sizeFilter: SizeFilter = .any { didSet { schedule() } }
-    @Published var hits: [SearchHit] = []
+    @Published private(set) var loadingMode: ResultLoadingMode
+    @Published private(set) var loadingMore = false
+    @Published private(set) var hasMore = false
+    @Published private(set) var totalResultCount: Int?
+    @Published var hits = SearchRows()
     @Published var selected: String?
     @Published var busy = false
+    @Published private(set) var sorting = false
+    @Published private(set) var preparingSort = false
     @Published var error: String?
     @Published var searched = false
     @Published var elapsed = ""
@@ -43,9 +50,19 @@ final class SearchModel: ObservableObject {
     @Published private(set) var scrollToTopRevision = 0
     private var orderingRevision = 0
     private var scrollAfterOrdering = false
-    private var positions: [String: Int] = [:]
-    private let resultsStore = SearchResultsStore()
+    private var positions = ResultRowLookup()
+    private var resultsStore: SearchResultsStore?
+    private var modeSubscription: AnyCancellable?
+    private var pageTask: Task<Void, Never>?
+    private var pageRequest: [String: Any]?
+    private var nextPage: Data?
+    private var pageRows: [SearchHit] = []
+    private var pagePositions: [String: Int] = [:]
+    private var pageLoadFailed = false
     private var sortTask: Task<Void, Never>?
+    private var preparationTask: Task<Void, Never>?
+    private var preparationRevision = 0
+    private var sortingPrepared = false
     private var snapshotRevision = -1
     private let client: SearchClient
     private var task: Task<Void, Never>?
@@ -53,7 +70,31 @@ final class SearchModel: ObservableObject {
     private var queryIsComposing = false
     private var refreshCatalog = false
 
-    init(client: SearchClient = SearchClient()) { self.client = client }
+    init(client: SearchClient = SearchClient()) {
+        self.client = client
+        loadingMode = SearchSettings.shared.loadingMode
+        modeSubscription = SearchSettings.shared.$loadingMode.dropFirst().receive(on: RunLoop.main).sink { [weak self] mode in
+            self?.changeLoadingMode(mode)
+        }
+    }
+
+    private func fullResultsStore() -> SearchResultsStore {
+        if let resultsStore { return resultsStore }
+        let store = SearchResultsStore()
+        resultsStore = store
+        return store
+    }
+
+    private func changeLoadingMode(_ mode: ResultLoadingMode) {
+        guard mode != loadingMode else { return }
+        loadingMode = mode
+        resultsStore = nil
+        snapshotRevision = -1
+        hits = SearchRows()
+        positions = ResultRowLookup()
+        dataRevision += 1
+        schedule(immediate: true)
+    }
 
     var selectedHit: SearchHit? { selected.flatMap(hit) }
     func hit(_ path: String) -> SearchHit? {
@@ -63,35 +104,56 @@ final class SearchModel: ObservableObject {
     func row(for path: String) -> Int? { positions[path] }
 
     func setSort(_ sort: ResultSort) {
+        guard self.sort != sort else { return }
         self.sort = sort
         resort()
     }
 
     func setDirectoriesFirst(_ enabled: Bool) {
+        guard directoriesFirst != enabled else { return }
         directoriesFirst = enabled
         resort()
     }
 
     private func resort() {
         orderingRevision += 1
+        if loadingMode == .onDemand {
+            schedule(immediate: true)
+            return
+        }
+        let resultsStore = fullResultsStore()
         scrollAfterOrdering = true
         sortTask?.cancel()
         let current = generation
         let ordering = orderingRevision
         let sort = self.sort
         let directoriesFirst = self.directoriesFirst
+        // Size/time changes can interrupt one-time name-index preparation.
+        // A name request reuses it instead of discarding and starting it again.
+        let preparation = sort?.column == .name ? preparationTask : nil
+        if preparation == nil {
+            preparationTask?.cancel()
+            preparationRevision += 1
+            preparingSort = false
+        }
+        sorting = true
         sortTask = Task {
+            defer { if ordering == orderingRevision { sorting = false } }
             do {
+                await preparation?.value
+                try Task.checkCancellation()
                 if let snapshot = try await resultsStore.sorted(by: sort, directoriesFirst: directoriesFirst,
                     orderingRevision: ordering, generation: current) {
                     guard !Task.isCancelled else { return }
                     publish(snapshot, scrollToTop: true)
+                    if !preparingSort { prepareSorting(generation: current) }
                 }
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
     }
 
     func useRelevanceSort() {
+        guard sort != nil else { return }
         sort = nil
         resort()
     }
@@ -118,24 +180,35 @@ final class SearchModel: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url { scope = url.path }
     }
 
-    private func schedule() {
+    private func schedule(immediate: Bool = false) {
         guard !queryIsComposing else { return }
         generation += 1
         task?.cancel()
+        pageTask?.cancel()
+        pageTask = nil
+        loadingMore = false
+        hasMore = false
+        totalResultCount = nil
+        pageRequest = nil
+        nextPage = nil
+        pageRows = []
+        pagePositions = [:]
+        pageLoadFailed = false
         sortTask?.cancel()
-        hits = []
-        positions = [:]
-        displayGeneration = generation
-        scrollToTopRevision += 1
+        preparationTask?.cancel()
+        preparationRevision += 1
+        preparingSort = false
+        sortingPrepared = false
+        sorting = false
         scrollAfterOrdering = false
-        dataRevision += 1
         selected = nil
         error = nil
         elapsed = ""
         searched = false
-        busy = false
+        busy = true
         task = Task {
-            try? await Task.sleep(nanoseconds: 220_000_000)
+            if loadingMode == .onDemand { await client.releaseCatalog() }
+            if !immediate { try? await Task.sleep(nanoseconds: 220_000_000) }
             guard !Task.isCancelled else { return }
             await perform()
         }
@@ -150,6 +223,13 @@ final class SearchModel: ObservableObject {
         if composing {
             generation += 1
             task?.cancel()
+            pageTask?.cancel()
+            loadingMore = false
+            sortTask?.cancel()
+            preparationTask?.cancel()
+            preparationRevision += 1
+            preparingSort = false
+            sorting = false
             busy = false
         }
     }
@@ -172,9 +252,17 @@ final class SearchModel: ObservableObject {
         if category == .custom {
             let parts = extensions.lowercased().components(separatedBy: CharacterSet(charactersIn: ",，;； ").union(.newlines))
                 .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".")) }.filter { !$0.isEmpty }
-            guard !parts.isEmpty else { return }
+            guard !parts.isEmpty else {
+                hits = SearchRows()
+                positions = ResultRowLookup()
+                displayGeneration = generation
+                dataRevision += 1
+                busy = false
+                return
+            }
             guard parts.allSatisfy({ $0.range(of: "^[a-z0-9_+-]+$", options: .regularExpression) != nil }) else {
                 error = "请输入有效后缀，多个后缀用逗号分隔，例如 pdf, docx。"
+                busy = false
                 return
             }
             request["ext"] = parts.joined(separator: ",")
@@ -190,19 +278,105 @@ final class SearchModel: ObservableObject {
         let catalogKey = [text, request["in"] as? String ?? "", timeFilter.rawValue, sizeFilter.rawValue,
             timeFilter == .today ? String(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970) : ""]
         do {
-            let hits = try await client.search(request, catalogKey: catalogKey, refresh: refresh)
-            guard current == generation, !Task.isCancelled else { return }
-            let snapshot = try await resultsStore.replace(hits, generation: current,
-                sort: sort, directoriesFirst: directoriesFirst, orderingRevision: orderingRevision)
-            guard current == generation, !Task.isCancelled else { return }
-            publish(snapshot)
+            if loadingMode == .onDemand {
+                request["sort"] = sort?.column.rawValue ?? "relevance"
+                request["ascending"] = sort?.ascending ?? true
+                request["directories_first"] = directoriesFirst
+                let page = try await client.searchPage(request, cursor: nil)
+                guard current == generation, !Task.isCancelled else { return }
+                pageRequest = request
+                applyPage(page, reset: true)
+            } else {
+                let batch = try await client.search(request, catalogKey: catalogKey, refresh: refresh)
+                guard current == generation, !Task.isCancelled else { return }
+                let snapshot = try await fullResultsStore().replace(batch, generation: current,
+                    sort: sort, directoriesFirst: directoriesFirst, orderingRevision: orderingRevision)
+                guard current == generation, !Task.isCancelled else { return }
+                publish(snapshot)
+                prepareSorting(generation: current)
+            }
             elapsed = String(format: "%.1f 毫秒", (ProcessInfo.processInfo.systemUptime - started) * 1000)
             searched = true
         } catch {
             guard current == generation, !Task.isCancelled else { return }
             self.error = error.localizedDescription
         }
-        if current == generation { busy = false }
+        if current == generation {
+            busy = false
+            if hits.isEmpty && hasMore { loadMore() }
+        }
+    }
+
+    private func applyPage(_ page: SearchPageBatch, reset: Bool) {
+        if reset {
+            pageRows = []
+            pagePositions = [:]
+            scrollToTopRevision += 1
+        }
+        for hit in page.hits where pagePositions[hit.path] == nil {
+            pagePositions[hit.path] = pageRows.count
+            pageRows.append(hit)
+        }
+        nextPage = page.next
+        hasMore = page.next != nil
+        if let total = page.total { totalResultCount = max(total, pageRows.count) }
+        else if !hasMore { totalResultCount = pageRows.count }
+        hits = SearchRows(pageRows)
+        positions = ResultRowLookup(base: pagePositions)
+        displayGeneration = generation
+        dataRevision += 1
+    }
+
+    func loadMoreIfNeeded(lastVisibleRow: Int) {
+        guard lastVisibleRow >= max(0, hits.count - 100) else { return }
+        loadMore()
+    }
+
+    private func loadMore(retry: Bool = false) {
+        guard loadingMode == .onDemand, !busy, !loadingMore, hasMore,
+              !pageLoadFailed || retry, let request = pageRequest, let cursor = nextPage else { return }
+        let current = generation
+        loadingMore = true
+        pageLoadFailed = false
+        error = nil
+        pageTask = Task {
+            do {
+                let page = try await client.searchPage(request, cursor: cursor)
+                guard current == generation, !Task.isCancelled else { return }
+                applyPage(page, reset: false)
+                loadingMore = false
+                // A time-bounded index scan can cross an empty region before
+                // reaching a sparse category. Advance that cursor automatically.
+                if page.hits.isEmpty && hasMore { loadMore() }
+            } catch {
+                guard current == generation, !Task.isCancelled else { return }
+                loadingMore = false
+                pageLoadFailed = true
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    func retrySearch() {
+        if loadingMode == .onDemand && pageLoadFailed { loadMore(retry: true) }
+        else { search() }
+    }
+
+    private func prepareSorting(generation current: Int) {
+        guard loadingMode == .full, !sortingPrepared, let resultsStore else { return }
+        preparationTask?.cancel()
+        preparationRevision += 1
+        let preparation = preparationRevision
+        preparingSort = true
+        preparationTask = Task(priority: .utility) {
+            defer { if current == generation && preparation == preparationRevision { preparingSort = false } }
+            do {
+                try await resultsStore.prepareSorting(generation: current)
+                if current == generation && preparation == preparationRevision && !Task.isCancelled {
+                    sortingPrepared = true
+                }
+            } catch { /* Interactive requests can cancel optional preparation. */ }
+        }
     }
 
     func open(_ hit: SearchHit) {

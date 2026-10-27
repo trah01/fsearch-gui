@@ -2,30 +2,34 @@
 //! it never repeats a top-k search over all preceding pages.
 
 use super::*;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 const POSITION_BITS: usize = 48;
 const POSITION_MASK: usize = (1usize << POSITION_BITS) - 1;
 
 pub(super) fn page(internal: &Live, external: &[(PathBuf, Arc<Live>)], query: &Query, cursor: usize) -> (Vec<Found>, Option<usize>) {
-    collect(internal, external, query, cursor, false)
+    collect(internal, external, query, cursor, false, 2000)
+}
+
+pub(super) fn desktop_page(internal: &Live, external: &[(PathBuf, Arc<Live>)], query: &Query, cursor: usize) -> (Vec<Found>, Option<usize>) {
+    collect(internal, external, query, cursor, false, 3000)
 }
 
 pub(super) fn all(internal: &Live, external: &[(PathBuf, Arc<Live>)], query: &Query) -> Vec<Found> {
-    let (mut found, _) = collect(internal, external, query, 0, true);
+    let (mut found, _) = collect(internal, external, query, 0, true, 2000);
     if !query.tokens.is_empty() {
         found.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
     }
     found
 }
 
-fn collect(internal: &Live, external: &[(PathBuf, Arc<Live>)], query: &Query, cursor: usize, all: bool) -> (Vec<Found>, Option<usize>) {
+fn collect(internal: &Live, external: &[(PathBuf, Arc<Live>)], query: &Query, cursor: usize, all: bool, page_limit: usize) -> (Vec<Found>, Option<usize>) {
     let mut sources: Vec<(Option<&[u8]>, &Live)> = vec![(None, internal)];
     sources.extend(external.iter().map(|(path, live)| (Some(path.as_os_str().as_bytes()), live.as_ref())));
     let mut source = cursor >> POSITION_BITS;
     let mut position = cursor & POSITION_MASK;
     let mut found = Vec::new();
-    let limit = query.limit.clamp(1, 2000);
+    let limit = query.limit.clamp(1, page_limit);
     let started = Instant::now();
     let mut inspected = 0usize;
     while source < sources.len() {
@@ -62,7 +66,9 @@ fn collect(internal: &Live, external: &[(PathBuf, Arc<Live>)], query: &Query, cu
             };
             if let Some((path, kind, size, mtime)) = entry {
                 if let Some(score) = query.match_path(&path, kind, size, mtime) {
-                    found.push(Found { path: PathBuf::from(std::ffi::OsStr::from_bytes(&path)), kind, size, mtime, score });
+                    // Transfer the reconstructed path rather than allocating
+                    // and copying it a second time for every indexed entry.
+                    found.push(Found { path: PathBuf::from(std::ffi::OsString::from_vec(path)), kind, size, mtime, score });
                 }
             }
             if !all && (found.len() >= limit || (inspected % 256 == 0 && started.elapsed() >= Duration::from_millis(25))) {

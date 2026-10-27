@@ -266,8 +266,8 @@ struct SearchView: View {
                     if let error = model.error {
                         Image(systemName: "exclamationmark.triangle").font(.system(size: 26))
                         Text(error).multilineTextAlignment(.center).textSelection(.enabled)
-                        Button("重试", action: model.search)
-                    } else if model.busy {
+                        Button("重试", action: model.retrySearch)
+                    } else if model.busy || model.loadingMore {
                         ProgressView().controlSize(.small)
                         Text("正在搜索…")
                     } else {
@@ -283,12 +283,19 @@ struct SearchView: View {
 
     private var statusBar: some View {
         HStack(spacing: 10) {
-            if model.busy { ProgressView().controlSize(.mini) }
-            if !model.busy { Text("共 \(model.hits.count) 项") }
+            if model.busy || model.sorting || model.preparingSort || model.loadingMore { ProgressView().controlSize(.mini) }
+            if model.preparingSort { Text("正在准备排序索引…") }
+            else if model.sorting { Text("正在排序…") }
+            if !model.busy {
+                if model.loadingMode == .onDemand && model.hasMore {
+                    Text("已加载 \(model.hits.count) 项")
+                } else { Text("共 \(model.hits.count) 项") }
+            }
+            if model.loadingMore { Text("正在加载更多…") }
             if !model.elapsed.isEmpty { Text(model.elapsed).foregroundStyle(.tertiary) }
             if let error = model.error, !model.hits.isEmpty {
                 Text(error).lineLimit(1).help(error)
-                Button("重试", action: model.search)
+                Button("重试", action: model.retrySearch)
             }
             Spacer(minLength: 0)
             if model.selectedHit != nil {

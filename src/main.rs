@@ -146,7 +146,7 @@ fn desktop_stdio() {
         let mut line = String::new();
         BufReader::new(stream).read_line(&mut line)?;
         let value: serde_json::Value = serde_json::from_str(&line)?;
-        Ok(value["storage_revision"] == 3 && value["desktop_compact_results"] == true)
+        Ok(value["storage_revision"] == 3 && value["desktop_binary_results"] == 1 && value["desktop_paged_results"] == 1)
     })().unwrap_or(false);
     if !supported {
         server::stop(&data_dir()).unwrap_or_else(|e| die(&e));

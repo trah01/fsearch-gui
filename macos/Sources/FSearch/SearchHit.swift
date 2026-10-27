@@ -16,7 +16,16 @@ struct SearchHit: Identifiable, Sendable, Decodable {
     let kind: UInt8
     let typeMask: UInt8
     var isDirectory: Bool { kind == 1 }
-    var name: String { (path as NSString).lastPathComponent }
+    var name: String { String(nameSlice) }
+    var nameSlice: Substring {
+        let bytes = path.utf8
+        guard let slash = bytes.lastIndex(of: 47) else { return path[...] }
+        let start = bytes.index(after: slash)
+        // Indexed paths normally have no trailing separator. Preserve the
+        // existing Foundation behavior for roots and exceptional inputs.
+        guard start != path.endIndex else { return Substring((path as NSString).lastPathComponent) }
+        return path[start...]
+    }
     var created: Date? { nil }
     var sizeText: String { isDirectory ? "—" : SearchFormatting.size(size) }
     var modifiedText: String { modified == .distantPast ? "—" : modified.formatted(SearchFormatting.date) }
@@ -27,6 +36,14 @@ struct SearchHit: Identifiable, Sendable, Decodable {
         if isDirectory { return "文件夹" }
         let ext = (path as NSString).pathExtension.uppercased()
         return ext.isEmpty ? "文件" : "\(ext) 文件"
+    }
+
+    init(path: String, kind: UInt8, size: Int64, modified: Date, typeMask: UInt8) {
+        self.path = path
+        self.kind = kind
+        self.size = size
+        self.modified = modified
+        self.typeMask = typeMask
     }
 
     /// Compact desktop JSON rows: [path, kind, size, modification time, type mask].

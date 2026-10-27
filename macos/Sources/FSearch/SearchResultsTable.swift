@@ -68,7 +68,7 @@ struct SearchResultsTable: NSViewRepresentable {
         let model: SearchModel
         var preview: (SearchHit) -> Void
         private weak var table: NSTableView?
-        private var rows: [SearchHit] = []
+        private var rows = SearchRows()
         private var revision = -1
         private var generation = -1
         private var scrollToTopRevision = -1
@@ -118,12 +118,21 @@ struct SearchResultsTable: NSViewRepresentable {
                 let visible = table.rows(in: table.visibleRect)
                 let first = visible.location != NSNotFound && rows.indices.contains(visible.location) ? rows[visible.location].path : nil
                 let offset = visible.location == NSNotFound ? 0 : table.visibleRect.minY - table.rect(ofRow: visible.location).minY
+                let previousCount = rows.count
                 rows = model.hits
                 revision = model.dataRevision
                 generation = model.displayGeneration
                 scrollToTopRevision = model.scrollToTopRevision
                 changingSelection = true
-                table.reloadData()
+                if previousCount == rows.count {
+                    // A sort changes the permutation, not the row count.
+                    // Refresh allocated cells instead of rebuilding the table.
+                    var allocated = IndexSet()
+                    table.enumerateAvailableRowViews { _, row in
+                        if self.rows.indices.contains(row) { allocated.insert(row) }
+                    }
+                    table.reloadData(forRowIndexes: allocated, columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+                } else { table.reloadData() }
                 if let selected = model.selected, let row = model.row(for: selected) {
                     table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
                 } else { table.deselectAll(nil) }
@@ -241,6 +250,7 @@ struct SearchResultsTable: NSViewRepresentable {
             let work = DispatchWorkItem { [weak self] in
                 guard let self else { return }
                 let range = self.visibleRows(padding: 8)
+                if !range.isEmpty { self.model.loadMoreIfNeeded(lastVisibleRow: range.upperBound - 1) }
                 let wanted = Set(range.map { self.rows[$0].path })
                 for path in Array(self.pending.keys) where !wanted.contains(path) {
                     self.pending.removeValue(forKey: path)?.cancel()

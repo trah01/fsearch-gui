@@ -1,21 +1,22 @@
 import Foundation
 import Darwin
 
-/// A single JSON-lines session shares the CLI daemon and its existing index.
+/// A framed session shares the CLI daemon and its existing index.
 actor SearchClient {
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
     private var pending = Data()
     private var catalog: SearchCatalog?
+    private var catalogRevision = 0
     private let timeout: TimeInterval
 
     init(timeout: TimeInterval = 20) { self.timeout = timeout }
 
     /// Validate scope and decode index-only rows on the background executor.
-    func search(_ request: [String: Any], catalogKey: [String], refresh: Bool) throws -> [SearchHit] {
+    func search(_ request: [String: Any], catalogKey: [String], refresh: Bool) throws -> SearchBatch {
         if refresh { catalog = nil }
-        if let catalog, catalog.key == catalogKey { return try catalog.filtered(request) }
+        if catalog?.key == catalogKey { return try batch(request: request) }
         if let path = request["in"] as? String {
             var isDirectory: ObjCBool = false
             guard path.hasPrefix("/"), FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
@@ -24,18 +25,68 @@ actor SearchClient {
         }
         var baseRequest = request
         for field in ["type", "kind", "ext"] { baseRequest.removeValue(forKey: field) }
-        baseRequest["format"] = "compact"
-        let response = try JSONDecoder().decode(DesktopSearchResponse.self, from: exchange(baseRequest))
-        guard response.ok else {
-            throw ClientError.message(response.error ?? "搜索失败，请重试。")
+        baseRequest["format"] = "binary-v1"
+        let result = try fetchRows(baseRequest)
+        guard let types = result.response.types else { throw ClientError.message("搜索服务返回了无法识别的数据。") }
+        self.catalog = SearchCatalog(key: catalogKey, entries: result.hits, types: types)
+        catalogRevision += 1
+        return try batch(request: request)
+    }
+
+    func releaseCatalog() { catalog = nil }
+
+    func searchPage(_ request: [String: Any], cursor: Data?) throws -> SearchPageBatch {
+        catalog = nil
+        var request = request
+        request["op"] = "search-page"
+        request["limit"] = 3000
+        request["format"] = "binary-v1"
+        if let cursor { request["cursor"] = try JSONSerialization.jsonObject(with: cursor) }
+        let result = try fetchRows(request, maximumRows: 3000)
+        let fields = try JSONSerialization.jsonObject(with: result.header) as? [String: Any]
+        let next: Data?
+        if let value = fields?["next"], !(value is NSNull) {
+            next = try JSONSerialization.data(withJSONObject: value)
+        } else { next = nil }
+        return SearchPageBatch(hits: result.hits, next: next, total: result.response.total)
+    }
+
+    private func fetchRows(_ request: [String: Any], maximumRows: Int? = nil) throws -> (hits: [SearchHit], response: DesktopSearchResponse, header: Data) {
+        do {
+            let header = try exchange(request)
+            let response = try JSONDecoder().decode(DesktopSearchResponse.self, from: header)
+            guard response.ok else { throw ClientError.message(response.error ?? "搜索失败，请重试。") }
+            guard response.binary_version == 1, let length = response.binary_bytes, let count = response.count,
+                  length >= 0, count >= 0, count <= length / 20,
+                  maximumRows.map({ count <= $0 }) ?? true else {
+                throw ClientError.message("搜索服务返回了无法识别的数据。")
+            }
+            let hits = try SearchBinaryRows.decode(readPayload(length), count: count)
+            return (hits, response, header)
+        } catch {
+            disconnect()
+            throw error
         }
-        try Task.checkCancellation()
-        guard let hits = response.entries, let types = response.types else {
-            throw ClientError.message("搜索服务返回了无法识别的数据。")
+    }
+
+    private func batch(request: [String: Any]) throws -> SearchBatch {
+        let filter = ["type", "kind", "ext"].map { request[$0] as? String ?? "" }
+        return SearchBatch(hits: try catalog!.filtered(request), catalogRevision: catalogRevision, filter: filter)
+    }
+
+    private func readPayload(_ length: Int) throws -> Data {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        var data = Data()
+        data.reserveCapacity(length)
+        let available = min(length, pending.count)
+        data.append(pending.prefix(available))
+        pending = Data(pending.dropFirst(available))
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        while data.count < length {
+            let count = try read(into: &buffer, limit: min(buffer.count, length - data.count), deadline: deadline)
+            data.append(contentsOf: buffer.prefix(count))
         }
-        let catalog = SearchCatalog(key: catalogKey, entries: hits, types: types)
-        self.catalog = catalog
-        return try catalog.filtered(request)
+        return data
     }
 
     private func connect() throws {
@@ -109,30 +160,7 @@ actor SearchClient {
             var complete = pending.contains(10)
             var buffer = [UInt8](repeating: 0, count: 65536)
             while !complete {
-                try Task.checkCancellation()
-                guard ProcessInfo.processInfo.systemUptime < deadline else {
-                    throw ClientError.message("搜索响应超时，请稍后重试。首次使用时，建立索引可能需要一些时间。")
-                }
-                guard let output else {
-                    throw ClientError.message("搜索服务连接已断开，请点击重试。")
-                }
-                var descriptor = pollfd(fd: output.fileDescriptor, events: Int16(POLLIN), revents: 0)
-                let ready = Darwin.poll(&descriptor, 1, 100)
-                if ready < 0 {
-                    if errno == EINTR { continue }
-                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-                }
-                if ready == 0 { continue }
-                // FileHandle.read(upToCount:) may wait to fill its buffer on a
-                // persistent pipe. POSIX read returns the bytes available now.
-                let count = Darwin.read(output.fileDescriptor, &buffer, buffer.count)
-                if count < 0 {
-                    if errno == EINTR { continue }
-                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-                }
-                guard count > 0 else {
-                    throw ClientError.message("搜索服务连接已断开，请点击重试。")
-                }
+                let count = try read(into: &buffer, limit: buffer.count, deadline: deadline)
                 complete = buffer.prefix(count).contains(10)
                 pending.append(contentsOf: buffer.prefix(count))
             }
@@ -147,13 +175,62 @@ actor SearchClient {
             throw error
         }
     }
+
+    private func read(into buffer: inout [UInt8], limit: Int, deadline: TimeInterval) throws -> Int {
+        while true {
+            try Task.checkCancellation()
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                throw ClientError.message("搜索响应超时，请稍后重试。首次使用时，建立索引可能需要一些时间。")
+            }
+            guard let output else { throw ClientError.message("搜索服务连接已断开，请点击重试。") }
+            var descriptor = pollfd(fd: output.fileDescriptor, events: Int16(POLLIN), revents: 0)
+            let ready = Darwin.poll(&descriptor, 1, 100)
+            if ready < 0 {
+                if errno == EINTR { continue }
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            if ready == 0 { continue }
+            let count = Darwin.read(output.fileDescriptor, &buffer, limit)
+            if count < 0 {
+                if errno == EINTR { continue }
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            guard count > 0 else { throw ClientError.message("搜索服务连接已断开，请点击重试。") }
+            return count
+        }
+    }
 }
 
 private struct DesktopSearchResponse: Decodable {
     let ok: Bool
-    let entries: [SearchHit]?
+    let binary_version: Int?
+    let binary_bytes: Int?
+    let count: Int?
     let types: [String]?
     let error: String?
+    let total: Int?
+}
+
+struct SearchBatch: Sendable {
+    let hits: SearchRows
+    let catalogRevision: Int
+    let filter: [String]
+
+    init(hits: SearchRows, catalogRevision: Int, filter: [String]) {
+        self.hits = hits
+        self.catalogRevision = catalogRevision
+        self.filter = filter
+    }
+
+    init(hits: [SearchHit], catalogRevision: Int, filter: [String]) {
+        self.init(hits: SearchRows(hits), catalogRevision: catalogRevision, filter: filter)
+    }
+}
+
+struct SearchPageBatch: Sendable {
+    let hits: [SearchHit]
+    let next: Data?
+    let total: Int?
 }
 
 enum ClientError: LocalizedError {

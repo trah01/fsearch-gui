@@ -14,5 +14,5 @@ pub mod walk;
 mod volumes;
 
 pub use content::{Case, FileMatches, Grep, GrepResult, Hit};
-pub use engine::{Engine, Found, Options, Status, default_dir, gated, has_full_disk_access, no_materialize};
+pub use engine::{Engine, Found, Options, PageColumn, PageOrder, SearchPage, Status, default_dir, gated, has_full_disk_access, no_materialize};
 pub use query::{GrepMode, Query};

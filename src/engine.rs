@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 
 mod maintenance;
 mod browsing;
+mod paging;
+pub use paging::{PageColumn, PageOrder, SearchPage};
 
 // Every search scans the whole overlay (~1 ms per 100k entries), and a
 // follower starting up replays everything since the save, so fold it into
@@ -47,6 +49,7 @@ pub struct Options {
 }
 
 /// One name-search result.
+#[derive(Clone)]
 pub struct Found {
     pub path: PathBuf,
     /// `walk::KIND_*` in the low 2 bits, `walk::FLAG_*` above.
@@ -359,8 +362,42 @@ impl Engine {
         Ok(page)
     }
 
+    pub fn desktop_browse(&self, query: &Query, cursor: usize) -> Result<(Vec<Found>, Option<usize>), String> {
+        let (page, early) = self.s.with_names(query.scope.as_deref(), |live| {
+            browsing::desktop_page(live, &self.s.volumes.active(), query, cursor)
+        })?;
+        self.s.index_first(early);
+        Ok(page)
+    }
+
+    pub fn search_page(&self, query: &Query, order: PageOrder, after: Option<&Found>, limit: usize) -> Result<SearchPage, String> {
+        let limit = limit.clamp(1, 3000);
+        if after.is_none() && !query.tokens.is_empty() && order.column == PageColumn::Relevance && !order.directories_first {
+            let mut query = query.clone();
+            query.limit = limit + 1;
+            let mut hits = self.search(&query)?;
+            let has_more = hits.len() > limit;
+            hits.truncate(limit);
+            let total = (!has_more).then_some(hits.len());
+            return Ok(SearchPage { hits, has_more, total });
+        }
+        let (page, early) = self.s.with_names(query.scope.as_deref(), |live| {
+            paging::collect(live, &self.s.volumes.active(), query, order, after, limit)
+        })?;
+        self.s.index_first(early);
+        Ok(page)
+    }
+
     /// Desktop lists include every matching entry in one response.
     pub fn search_all(&self, query: &Query) -> Result<Vec<Found>, String> {
+        if !query.tokens.is_empty() {
+            // Reuse indexed candidate selection, name-score caching and the
+            // search pool. Browsing would reconstruct and match every path,
+            // even when the name index can reject almost all entries.
+            let mut complete = query.clone();
+            complete.limit = usize::MAX;
+            return self.search(&complete);
+        }
         let (hits, early) = self.s.with_names(query.scope.as_deref(), |live| {
             browsing::all(live, &self.s.volumes.active(), query)
         })?;

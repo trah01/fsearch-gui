@@ -59,6 +59,8 @@ struct AppSettingsView: View {
     @ObservedObject private var appearance = AppearanceSettings.shared
     var body: some View {
         TabView {
+            SearchSettingsView()
+                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
             AppearanceSettingsView()
                 .tabItem { Label("外观", systemImage: "paintpalette") }
             StorageSettingsView(permissions: permissions)

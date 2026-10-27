@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod desktop;
+mod paging;
+
 pub fn socket_path(dir: &Path) -> PathBuf {
     dir.join("fsearch.sock")
 }
@@ -154,6 +157,8 @@ fn respond(line: &str, cx: &Ctx, out: &mut Vec<u8>) {
         Ok(Reply::DesktopHits(found, took_us)) => {
             put(out, &DesktopHits { entries: DesktopRows(&found), types: DESKTOP_TYPES, id, ok: true, took_us });
         }
+        Ok(Reply::DesktopBinary(found, took_us)) => desktop::write(out, &found, id, took_us),
+        Ok(Reply::DesktopPage(found, took_us, next, total)) => desktop::write_page(out, &found, id, took_us, next, total),
         Ok(Reply::Value(mut r)) => {
             r["id"] = id.clone();
             put(out, &r)
@@ -170,6 +175,8 @@ fn put(out: &mut Vec<u8>, v: &impl serde::Serialize) {
 enum Reply {
     Value(Value),
     DesktopHits(Vec<Found>, u64),
+    DesktopBinary(Vec<Found>, u64),
+    DesktopPage(Vec<Found>, u64, Option<Value>, Option<usize>),
     /// Name-search results, the search's own time (µs), for a paged request
     /// where the next page starts, and whether to give each hit's git
     /// status: the hot path, written straight from the results.
@@ -194,26 +201,11 @@ const DESKTOP_TYPES: &[&str] = &["audio", "archive", "doc", "app", "other", "ima
 impl serde::Serialize for DesktopRows<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeSeq;
-        let filters: Vec<Query> = DESKTOP_TYPES.iter().map(|name| {
-            let mut query = Query::parse("", "").expect("empty query");
-            query.filter("type", name, "").expect("desktop file type");
-            if !matches!(*name, "app" | "other") { query.filter("kind", "file", "").expect("file kind"); }
-            query
-        }).collect();
-        let mut classifications = std::collections::HashMap::new();
+        let mut classifier = desktop::Classifier::new();
         let mut rows = serializer.serialize_seq(Some(self.0.len()))?;
         for hit in self.0 {
-            let path = hit.path.as_os_str().as_bytes();
-            let extension = path.iter().rposition(|&b| b == b'.' || b == b'/')
-                .filter(|&i| path[i] == b'.').map(|i| path[i..].to_ascii_lowercase()).unwrap_or_default();
             let kind = hit.kind & 3;
-            // Classification depends only on extension and file kind. Reuse
-            // the engine's existing type rules once per distinct pair.
-            let mask = *classifications.entry((kind, extension)).or_insert_with(|| {
-                filters.iter().enumerate().fold(0u8, |mask, (i, query)| {
-                    mask | if query.match_path(path, kind, 0, 0).is_some() { 1 << i } else { 0 }
-                })
-            });
+            let mask = classifier.mask(hit);
             rows.serialize_element(&(hit.path.to_string_lossy(), kind, hit.size, hit.mtime, mask))?;
         }
         rows.end()
@@ -250,7 +242,8 @@ fn run(v: &Value, cx: &Ctx) -> Result<Reply, String> {
         || (op == "search"
             && v.get("q").and_then(Value::as_str).is_some_and(|q| ["grep:", "regex:", "sym:", "content:", "symbol:"].iter().any(|k| q.contains(k))));
     match op {
-        "ping" => Ok(Reply::Value(json!({"ok": true, "desktop_storage": true, "storage_revision": 3, "desktop_search_all": true, "desktop_compact_results": true}))),
+        "ping" => Ok(Reply::Value(json!({"ok": true, "desktop_storage": true, "storage_revision": 3, "desktop_search_all": true, "desktop_compact_results": true, "desktop_binary_results": 1, "desktop_paged_results": 1}))),
+        "search-page" => paging::run(v, engine),
         "search-all" => {
             let (q, selectors) = parse_request(v, engine.home())?;
             if q.grep.is_some() {
@@ -262,7 +255,9 @@ fn run(v: &Value, cx: &Ctx) -> Result<Reply, String> {
             let started = Instant::now();
             let hits = engine.search_all(&q)?;
             let took_us = started.elapsed().as_micros() as u64;
-            if v.get("format").and_then(Value::as_str) == Some("compact") {
+            if v.get("format").and_then(Value::as_str) == Some("binary-v1") {
+                Ok(Reply::DesktopBinary(hits, took_us))
+            } else if v.get("format").and_then(Value::as_str) == Some("compact") {
                 Ok(Reply::DesktopHits(hits, took_us))
             } else {
                 Ok(Reply::Hits(hits, took_us, None, false))
