@@ -10,5 +10,6 @@ pub fn status(engine: &Engine) -> Value {
         "active_full_disk_access": engine.status().full_disk_access,
         "internal": engine.internal_index_status(),
         "volumes": engine.external_storage_status(),
+        "settings": engine.index_settings(),
     })
 }

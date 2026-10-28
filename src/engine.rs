@@ -17,6 +17,8 @@ use std::sync::{Arc, Condvar, Mutex, RwLock, RwLockReadGuard};
 use std::time::{Duration, Instant};
 
 mod maintenance;
+mod settings;
+pub use settings::IndexSettings;
 mod browsing;
 mod paging;
 pub use paging::{PageColumn, PageOrder, SearchPage};
@@ -92,6 +94,8 @@ pub struct Engine {
 }
 
 struct Shared {
+    settings: RwLock<IndexSettings>,
+    automatic: AtomicBool,
     volumes: crate::volumes::VolumeIndexes,
     maintenance: maintenance::Maintenance,
     live: RwLock<Option<Live>>,
@@ -258,12 +262,16 @@ impl Engine {
             let _ = walk::SKIP.set(skip);
         }
         let dir = opts.dir;
+        let settings = IndexSettings::load(&dir)?;
+        *walk::EXCLUDED.write().unwrap() = settings.excluded.iter().map(|path| path.as_os_str().as_bytes().to_vec()).collect();
         let loading = Index::load(&dir.join("index.bin"));
         let (tx, rx) = std::sync::mpsc::channel();
         let (ctx, crx) = std::sync::mpsc::channel();
         let content = if owner { Content::open(dir.join("content")) } else { Content::open_shared(dir.join("content")) };
         let content_ready = AtomicBool::new(!owner || !content.segs.is_empty());
         let shared = Arc::new(Shared {
+            automatic: AtomicBool::new(settings.automatic),
+            settings: RwLock::new(settings),
             volumes: crate::volumes::VolumeIndexes::new(&dir, &opts.home)?,
             maintenance: maintenance::Maintenance::default(),
             live: RwLock::new(None),
@@ -341,7 +349,7 @@ impl Engine {
             if let Some(l) = s.live.read().unwrap().as_ref() {
                 l.base.prefault();
             }
-            if owner {
+            if owner && s.automatic.load(Ordering::Acquire) {
                 rescan_unskipped(&s);
             }
             apply_loop(&s, rx);
@@ -355,6 +363,7 @@ impl Engine {
 
     /// Enumerate all indexed entries without the ranked-search paging limit.
     pub fn browse(&self, query: &Query, cursor: usize) -> Result<(Vec<Found>, Option<usize>), String> {
+        let query = &self.configured_query(query);
         let (page, early) = self.s.with_names(query.scope.as_deref(), |live| {
             browsing::page(live, &self.s.volumes.active(), query, cursor)
         })?;
@@ -367,6 +376,7 @@ impl Engine {
     }
 
     pub fn desktop_browse_ordered(&self, query: &Query, cursor: usize, directories_first: bool) -> Result<(Vec<Found>, Option<usize>), String> {
+        let query = &self.configured_query(query);
         let (page, early) = self.s.with_names(query.scope.as_deref(), |live| {
             let external = self.s.volumes.active();
             if directories_first { browsing::desktop_directories_first(live, &external, query, cursor) }
@@ -377,6 +387,7 @@ impl Engine {
     }
 
     pub fn search_page(&self, query: &Query, order: PageOrder, after: Option<&Found>, limit: usize) -> Result<SearchPage, String> {
+        let query = &self.configured_query(query);
         let limit = limit.clamp(1, 3000);
         if after.is_none() && !query.tokens.is_empty() && order.column == PageColumn::Relevance && !order.directories_first {
             let mut query = query.clone();
@@ -397,6 +408,7 @@ impl Engine {
 
     /// Desktop lists include every matching entry in one response.
     pub fn search_all(&self, query: &Query) -> Result<Vec<Found>, String> {
+        let query = &self.configured_query(query);
         if !query.tokens.is_empty() {
             // Reuse indexed candidate selection, name-score caching and the
             // search pool. Browsing would reconstruct and match every path,
@@ -430,6 +442,7 @@ impl Engine {
 
     /// Name search.
     pub fn search(&self, q: &Query) -> Result<Vec<Found>, String> {
+        let q = &self.configured_query(q);
         WARM_UNTIL.store(0, Ordering::Relaxed);
         let (mut found, early) = self.s.with_names(q.scope.as_deref(), |live| {
             let mut p = Vec::new();
@@ -464,6 +477,7 @@ impl Engine {
     /// The bool says whether the content index answered (false: files were
     /// picked from the name index and read, for folders it doesn't cover).
     pub fn grep(&self, q: &Query, g: &Grep) -> Result<(GrepResult, bool), String> {
+        let q = &self.configured_query(q);
         if q.scope.as_ref().is_some_and(|s| s == b"/Volumes" || s.starts_with(b"/Volumes/")) {
             return Ok((content::verify(g, &self.s.volumes.content_paths(q), q.limit), false));
         }
@@ -546,7 +560,14 @@ impl Engine {
 
     pub fn rebuild_internal_index(&self) -> Result<(), String> { self.s.maintenance.request(&self.s) }
 
-    pub fn internal_index_status(&self) -> serde_json::Value { self.s.maintenance.status() }
+    pub fn internal_index_status(&self) -> serde_json::Value {
+        let mut status = self.s.maintenance.status();
+        if let Some(live) = self.s.live.read().unwrap().as_ref() {
+            status["updated_at"] = serde_json::json!(live.synced_at);
+            status["entries"] = serde_json::json!((live.base.n + live.over.len()).saturating_sub(live.dead_count));
+        }
+        status
+    }
 
     /// Have `f` told the folders each batch of disk changes touched (true:
     /// and maybe anything below them), as the batch is applied (on the
@@ -1154,6 +1175,14 @@ fn apply_loop(shared: &Arc<Shared>, rx: Receiver<Vec<fsevents::Event>>) {
         };
         events.extend(rx.try_iter().flatten());
         maintenance::run(shared);
+        // Keep the last applied event id while paused. Enabling automatic
+        // updates starts a history replay, including changes made meanwhile.
+        if !shared.automatic.load(Ordering::Acquire) {
+            events.clear();
+            pace = Pace::default();
+            gap = None;
+            replays = 0;
+        }
         // The owner wrote the index files: a follower picks that up now
         // rather than at its next periodic check.
         let owner_wrote = events.iter().any(|e| under(&e.path, ours));

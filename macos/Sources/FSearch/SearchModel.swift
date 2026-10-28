@@ -26,11 +26,22 @@ enum FileCategory: String, CaseIterable, Identifiable {
 @MainActor
 final class SearchModel: ObservableObject {
     @Published var query = "" { didSet { schedule() } }
-    @Published var scope = "" { didSet { schedule() } }
-    @Published var category: FileCategory = .all { didSet { if category != oldValue { schedule(immediate: true) } } }
-    @Published var extensions = "" { didSet { schedule() } }
-    @Published var timeFilter: TimeFilter = .any { didSet { schedule() } }
-    @Published var sizeFilter: SizeFilter = .any { didSet { schedule() } }
+    @Published var scope = "" { didSet { saveFilterPreferences(); schedule() } }
+    @Published var category: FileCategory = .all { didSet { if category != oldValue { saveFilterPreferences(); schedule(immediate: true) } } }
+    @Published var extensions = "" { didSet { saveFilterPreferences(); schedule() } }
+    @Published var timeFilter: TimeFilter = .any {
+        didSet {
+            if !applyingFilters { advancedFilters.modifiedDays = "" }
+            saveFilterPreferences(); schedule()
+        }
+    }
+    @Published var sizeFilter: SizeFilter = .any {
+        didSet {
+            if !applyingFilters { advancedFilters.minimumSize = ""; advancedFilters.maximumSize = "" }
+            saveFilterPreferences(); schedule()
+        }
+    }
+    @Published private(set) var advancedFilters = AdvancedSearchFilters()
     @Published private(set) var loadingMode: ResultLoadingMode
     @Published private(set) var loadingMore = false
     @Published private(set) var hasMore = false
@@ -53,6 +64,8 @@ final class SearchModel: ObservableObject {
     private var positions = ResultRowLookup()
     private var resultsStore: SearchResultsStore?
     private var modeSubscription: AnyCancellable?
+    private var defaultsSubscription: AnyCancellable?
+    private var rememberSubscription: AnyCancellable?
     private var pageTask: Task<Void, Never>?
     private var pageRequest: [String: Any]?
     private var nextPage: Data?
@@ -69,13 +82,57 @@ final class SearchModel: ObservableObject {
     private var generation = 0
     private var queryIsComposing = false
     private var refreshCatalog = false
+    private var applyingFilters = false
 
     init(client: SearchClient = SearchClient()) {
         self.client = client
-        loadingMode = SearchSettings.shared.loadingMode
+        let settings = SearchSettings.shared
+        loadingMode = settings.loadingMode
+        scope = settings.defaultScope
+        sort = settings.defaultSort.sort
+        directoriesFirst = settings.directoriesFirst
+        if settings.rememberFilters, let saved = UserDefaults.standard.dictionary(forKey: "FSearch.savedFilters") {
+            scope = saved["scope"] as? String ?? scope
+            category = FileCategory(rawValue: saved["category"] as? String ?? "") ?? .all
+            extensions = saved["extensions"] as? String ?? ""
+            timeFilter = TimeFilter(rawValue: saved["time"] as? String ?? "") ?? .any
+            sizeFilter = SizeFilter(rawValue: saved["size"] as? String ?? "") ?? .any
+            if let data = saved["advanced"] as? Data,
+               let filters = try? JSONDecoder().decode(AdvancedSearchFilters.self, from: data),
+               (try? filters.requestFields()) != nil {
+                advancedFilters = filters
+            }
+            if let column = ResultColumn(rawValue: saved["sort"] as? String ?? "") {
+                sort = ResultSort(column: column, ascending: saved["ascending"] as? Bool ?? true)
+            } else { sort = nil }
+            directoriesFirst = saved["directoriesFirst"] as? Bool ?? directoriesFirst
+        }
         modeSubscription = SearchSettings.shared.$loadingMode.dropFirst().receive(on: RunLoop.main).sink { [weak self] mode in
             self?.changeLoadingMode(mode)
         }
+        defaultsSubscription = NotificationCenter.default.publisher(for: .searchDefaultsChanged).sink { [weak self] _ in
+            guard let self else { return }
+            self.scope = settings.defaultScope
+            self.sort = settings.defaultSort.sort
+            self.directoriesFirst = settings.directoriesFirst
+            self.saveFilterPreferences()
+            self.schedule(immediate: true)
+        }
+        rememberSubscription = settings.$rememberFilters.dropFirst().receive(on: RunLoop.main).sink { [weak self] enabled in
+            if enabled { self?.saveFilterPreferences() }
+            else { UserDefaults.standard.removeObject(forKey: "FSearch.savedFilters") }
+        }
+    }
+
+    private func saveFilterPreferences() {
+        guard !applyingFilters, SearchSettings.shared.rememberFilters else { return }
+        UserDefaults.standard.set([
+            "scope": scope, "category": category.rawValue, "extensions": extensions,
+            "time": timeFilter.rawValue, "size": sizeFilter.rawValue,
+            "advanced": (try? JSONEncoder().encode(advancedFilters)) ?? Data(),
+            "sort": sort?.column.rawValue ?? "", "ascending": sort?.ascending ?? true,
+            "directoriesFirst": directoriesFirst
+        ], forKey: "FSearch.savedFilters")
     }
 
     private func fullResultsStore() -> SearchResultsStore {
@@ -97,6 +154,16 @@ final class SearchModel: ObservableObject {
     }
 
     var selectedHit: SearchHit? { selected.flatMap(hit) }
+    var hasActiveFilters: Bool {
+        advancedFilters.isActive || category != .all || timeFilter != .any || sizeFilter != .any || !scope.isEmpty
+    }
+    var timeFilterTitle: String {
+        advancedFilters.hasTime ? "过去 \(advancedFilters.modifiedDays) 天" : timeFilter.rawValue
+    }
+    var sizeFilterTitle: String {
+        if advancedFilters.hasSize { return advancedFilters.sizeTitle }
+        return sizeFilter == .any ? "大小" : sizeFilter == .large ? ">100 MB" : "<1 MB"
+    }
     func hit(_ path: String) -> SearchHit? {
         guard let row = positions[path], hits.indices.contains(row) else { return nil }
         return hits[row]
@@ -116,6 +183,7 @@ final class SearchModel: ObservableObject {
     }
 
     private func resort() {
+        saveFilterPreferences()
         orderingRevision += 1
         if loadingMode == .onDemand {
             schedule(immediate: true)
@@ -181,7 +249,7 @@ final class SearchModel: ObservableObject {
     }
 
     private func schedule(immediate: Bool = false) {
-        guard !queryIsComposing else { return }
+        guard !applyingFilters, !queryIsComposing else { return }
         generation += 1
         task?.cancel()
         pageTask?.cancel()
@@ -250,9 +318,7 @@ final class SearchModel: ObservableObject {
         path = (path as NSString).expandingTildeInPath
         if !path.isEmpty { request["in"] = (path as NSString).standardizingPath }
         if category == .custom {
-            let parts = extensions.lowercased().components(separatedBy: CharacterSet(charactersIn: ",，;； ").union(.newlines))
-                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".")) }.filter { !$0.isEmpty }
-            guard !parts.isEmpty else {
+            guard !extensions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 hits = SearchRows()
                 positions = ResultRowLookup()
                 displayGeneration = generation
@@ -260,13 +326,21 @@ final class SearchModel: ObservableObject {
                 busy = false
                 return
             }
-            guard parts.allSatisfy({ $0.range(of: "^[a-z0-9_+-]+$", options: .regularExpression) != nil }) else {
-                error = "请输入有效后缀，多个后缀用逗号分隔，例如 pdf, docx。"
+            do { request["ext"] = try AdvancedSearchFilters.normalizedExtensions(extensions) }
+            catch {
+                self.error = error.localizedDescription
                 busy = false
                 return
             }
-            request["ext"] = parts.joined(separator: ",")
             request["kind"] = "file"
+        }
+        do {
+            for (field, value) in try advancedFilters.requestFields() { request[field] = value }
+            if advancedFilters.hasSize && category != .folder && category != .application { request["kind"] = "file" }
+        } catch {
+            self.error = error.localizedDescription
+            busy = false
+            return
         }
         request["q"] = text
         let current = generation
@@ -275,7 +349,8 @@ final class SearchModel: ObservableObject {
         let started = ProcessInfo.processInfo.systemUptime
         let refresh = refreshCatalog
         refreshCatalog = false
-        let catalogKey = [text, request["in"] as? String ?? "", timeFilter.rawValue, sizeFilter.rawValue,
+        let catalogKey = [text, request["in"] as? String ?? "", request["re"] as? String ?? "",
+            advancedFilters.hasTime ? advancedFilters.modifiedDays : timeFilter.rawValue, request["size"] as? String ?? "",
             timeFilter == .today ? String(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970) : ""]
         do {
             if loadingMode == .onDemand {
@@ -388,12 +463,33 @@ final class SearchModel: ObservableObject {
         NSPasteboard.general.setString(hit.path, forType: .string)
     }
 
+    @discardableResult
+    func copyFile(_ hit: SearchHit) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.writeObjects([hit.fileURL as NSURL]) else {
+            error = "无法复制文件，请重试。"
+            return false
+        }
+        return true
+    }
+
     func resetFilters() {
-        category = .all
-        timeFilter = .any
+        applyAdvancedFilters(AdvancedSearchFilters(), category: .all, extensions: "", time: .any, scope: "")
+    }
+
+    func applyAdvancedFilters(_ filters: AdvancedSearchFilters, category: FileCategory, extensions: String,
+                              time: TimeFilter, scope: String) {
+        applyingFilters = true
+        self.category = category
+        self.extensions = extensions
+        timeFilter = time
         sizeFilter = .any
-        extensions = ""
-        scope = ""
+        self.scope = scope
+        advancedFilters = filters
+        applyingFilters = false
+        saveFilterPreferences()
+        schedule(immediate: true)
     }
 
     func openTerminal(_ hit: SearchHit) {

@@ -4,6 +4,7 @@ import AppKit
 struct SearchResultsGrid: View {
     @ObservedObject var model: SearchModel
     @ObservedObject private var appearance = AppearanceSettings.shared
+    @FocusState private var focused: Bool
     let preview: (SearchHit) -> Void
 
     var body: some View {
@@ -16,11 +17,17 @@ struct SearchResultsGrid: View {
                             FileGridItem(hit: hit, selected: model.selected == hit.path)
                                 .onAppear { model.loadMoreIfNeeded(lastVisibleRow: model.row(for: hit.path) ?? -1) }
                                 .onTapGesture(count: 2) { model.selected = hit.path; model.open(hit) }
-                                .onTapGesture { model.selected = hit.path }
+                                .onTapGesture { model.selected = hit.path; focused = true }
+                                .onDrag {
+                                    model.selected = hit.path
+                                    focused = true
+                                    return NSItemProvider(object: hit.fileURL as NSURL)
+                                }
                                 .contextMenu {
                                     Button("打开") { model.open(hit) }
                                     Button("快速查看") { preview(hit) }
                                     Button("在访达中显示") { model.reveal(hit) }
+                                    Button("复制文件") { model.copyFile(hit) }
                                     Button("复制路径") { model.copyPath(hit) }
                                     Button("在终端中打开") { model.openTerminal(hit) }
                                 }
@@ -38,6 +45,11 @@ struct SearchResultsGrid: View {
             }
         }
         .focusable()
+        .focused($focused)
+        .onCopyCommand {
+            guard let hit = model.selectedHit else { return [] }
+            return [NSItemProvider(object: hit.fileURL as NSURL)]
+        }
         .onMoveCommand { direction in
             guard !model.hits.isEmpty else { return }
             let current = model.selected.flatMap { model.row(for: $0) } ?? -1
@@ -67,10 +79,12 @@ private struct FileGridItem: View {
             }.frame(width: 58, height: 58).padding(.top, 12)
             Text(hit.name).font(.system(size: 12, weight: .medium)).lineLimit(2).truncationMode(.middle)
                 .multilineTextAlignment(.center).frame(height: 32)
-            Text(hit.sizeText).font(.system(size: 10)).foregroundStyle(.secondary)
+                .foregroundStyle(selected ? AppAppearance.onResultSelection : AppAppearance.text)
+            Text(hit.sizeText).font(.system(size: 10))
+                .foregroundStyle(selected ? AppAppearance.onResultSelection.opacity(0.85) : AppAppearance.muted)
         }
         .padding(10).frame(maxWidth: .infinity).frame(height: 146)
-        .background(selected ? AppAppearance.selection : AppAppearance.panel, in: RoundedRectangle(cornerRadius: AppAppearance.corner))
+        .background(selected ? AppAppearance.resultSelection : AppAppearance.panel, in: RoundedRectangle(cornerRadius: AppAppearance.corner))
         .overlay(RoundedRectangle(cornerRadius: AppAppearance.corner).strokeBorder(selected ? AppAppearance.accent.opacity(0.4) : AppAppearance.separator))
         .shadow(color: AppAppearance.shadow.opacity(0.5), radius: 8, x: 0, y: 3)
         .contentShape(Rectangle()).help(hit.path)

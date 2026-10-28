@@ -19,12 +19,13 @@ struct FileInspector: View {
     let preview: (SearchHit) -> Void
     @StateObject private var details = FileDetails()
     @State private var copied = false
+    @State private var copiedFile = false
 
     var body: some View {
         GeometryReader { geometry in
             let compact = geometry.size.height < 740
             if let hit {
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: compact ? 14 : 20) {
                         summary(hit, compact: compact)
                         VStack(alignment: .leading, spacing: 0) {
@@ -75,6 +76,7 @@ struct FileInspector: View {
         .background(Color.clear)
         .task(id: hit.map { "\($0.path):\($0.modified.timeIntervalSince1970)" }) {
             copied = false
+            copiedFile = false
             await details.load(hit)
         }
     }
@@ -96,9 +98,17 @@ struct FileInspector: View {
                     Label("打开", systemImage: "arrow.up.forward.square").font(.system(size: 14, weight: .medium))
                         .frame(maxWidth: .infinity).frame(height: 20)
                 }.buttonStyle(FloatingButtonStyle(radius: 18, prominent: true))
+                Button { copyFile(hit) } label: {
+                    Text(copiedFile ? "已复制" : "复制").font(.system(size: 14, weight: .medium))
+                        .frame(maxWidth: .infinity).frame(height: 20)
+                }
+                .buttonStyle(FloatingButtonStyle(radius: 18))
+                .help("复制文件，可粘贴到访达或其他支持文件的软件")
+                .accessibilityLabel(copiedFile ? "已复制文件" : "复制文件")
                 PopupButton(actions: [
                     PopupAction("快速查看") { preview(hit) },
                     PopupAction("在访达中显示") { model.reveal(hit) },
+                    PopupAction("复制文件") { copyFile(hit) },
                     PopupAction("复制路径") { copy(hit) },
                     PopupAction("在终端中打开") { model.openTerminal(hit) }
                 ], chevron: false) {
@@ -128,7 +138,11 @@ struct FileInspector: View {
         }.buttonStyle(FloatingButtonStyle(radius: 11))
     }
 
-    private func copy(_ hit: SearchHit) { model.copyPath(hit); copied = true }
+    private func copy(_ hit: SearchHit) { model.copyPath(hit); copied = true; copiedFile = false }
+    private func copyFile(_ hit: SearchHit) {
+        copiedFile = model.copyFile(hit)
+        if copiedFile { copied = false }
+    }
 }
 
 @MainActor

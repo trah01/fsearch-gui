@@ -274,6 +274,11 @@ fn run(v: &Value, cx: &Ctx) -> Result<Reply, String> {
             Ok(Reply::Hits(hits, started.elapsed().as_micros() as u64, next, false))
         }
         "storage" => Ok(Reply::Value(crate::storage::status(engine))),
+        "index-settings" => {
+            let settings = serde_json::from_value(v.get("settings").cloned().ok_or("缺少索引设置。")?).map_err(|e| format!("无效的索引设置：{e}"))?;
+            engine.update_index_settings(settings)?;
+            Ok(Reply::Value(json!({"ok": true, "settings": engine.index_settings()})))
+        }
         "storage-access" => {
             let path = v.get("path").and_then(Value::as_str).ok_or("请选择磁盘。")?;
             engine.check_volume_access(Path::new(path))?;

@@ -16,6 +16,7 @@ struct SearchHit: Identifiable, Sendable, Decodable {
     let kind: UInt8
     let typeMask: UInt8
     var isDirectory: Bool { kind == 1 }
+    var fileURL: URL { URL(fileURLWithPath: path, isDirectory: isDirectory) }
     var name: String { String(nameSlice) }
     var nameSlice: Substring {
         let bytes = path.utf8

@@ -19,7 +19,7 @@ struct FSearchApp: App {
         }
         .defaultSize(width: 1440, height: 860)
         .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unifiedCompact)
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("搜索") {

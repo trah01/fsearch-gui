@@ -505,6 +505,20 @@ impl Query {
         Ok(())
     }
 
+    /// Exclude one literal absolute folder and its descendants. Construct
+    /// literal parts directly so brackets, spaces and stars in names stay literal.
+    pub fn exclude_folder(&mut self, path: &[u8]) {
+        let text = format!("excluded:{}", String::from_utf8_lossy(path));
+        if self.globs.iter().any(|glob| glob.text == text) { return; }
+        let mut parts: Vec<Part> = path.split(|&b| b == b'/').filter(|part| !part.is_empty())
+            .map(|part| Part::Lit(part.to_ascii_lowercase())).collect();
+        if parts.is_empty() { return; }
+        let subtree = Alt { from: Anchor::Root, dirs: parts.clone(), name: None };
+        let name = parts.pop();
+        let folder = Alt { from: Anchor::Root, dirs: parts, name };
+        self.globs.push(Glob { negate: true, text, alts: vec![subtree, folder] });
+    }
+
     pub fn push_token(&mut self, w: &str) {
         let (mut t, mut negate, mut mode) = (w, false, Mode::Fuzzy);
         if let Some(r) = t.strip_prefix('!') {
@@ -4096,5 +4110,40 @@ mod tests {
     fn app_links_only_as_folders() {
         assert!(Query::parse("type:app", "/h").unwrap().kind_ok(KIND_LINK));
         assert!(!Query::parse("type:app kind:file", "/h").unwrap().kind_ok(KIND_LINK));
+    }
+
+    #[test]
+    fn settings_exclusion_preserves_literal_names_and_sibling_boundaries() {
+        let mut query = Query::parse("", "/h").unwrap();
+        query.exclude_folder(b"/Users/me/skip[1]");
+        for path in [b"/Users/me/skip[1]".as_slice(), b"/Users/me/skip[1]/report", b"/Users/me/skip[1]/nested/report"] {
+            assert!(query.match_path(path, KIND_FILE, 1, 1).is_none());
+        }
+        for path in [b"/Users/me/skip1/report".as_slice(), b"/Users/me/skip[1]-backup/report", b"/Users/other/skip[1]/report"] {
+            assert!(query.match_path(path, KIND_FILE, 1, 1).is_some());
+        }
+    }
+
+    #[test]
+    fn settings_exclusion_applies_to_ranked_index_search() {
+        let root = Listing { id: 0, names: b"skip[1]keep".to_vec(), ents: vec![
+            RawEnt { name_off: 0, name_len: 7, kind: KIND_DIR, size: 0, mtime: 1, child: 1 },
+            RawEnt { name_off: 7, name_len: 4, kind: KIND_DIR, size: 0, mtime: 1, child: 2 },
+        ] };
+        let folder = |id| Listing { id, names: b"report".to_vec(), ents: vec![
+            RawEnt { name_off: 0, name_len: 6, kind: KIND_FILE, size: 1, mtime: 1, child: NONE }
+        ] };
+        let live = Live::new(Index::build(vec![root, folder(1), folder(2)], 0, 0, b"/h"));
+        for text in ["report", "rep", "skip", ""] {
+            let mut query = Query::parse(text, "/h").unwrap();
+            query.exclude_folder(b"/skip[1]");
+            let hits = Searcher { live: &live }.search(&query);
+            for hit in &hits {
+                let mut path = Vec::new();
+                live.base.path(hit.idx as usize, &mut path);
+                assert!(!path.starts_with(b"/skip[1]"), "excluded path returned for {text}");
+            }
+            if text == "report" { assert_eq!(hits.len(), 1); }
+        }
     }
 }

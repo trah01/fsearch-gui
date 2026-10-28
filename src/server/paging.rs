@@ -19,6 +19,7 @@ pub(super) fn run(request: &Value, engine: &Engine) -> Result<Reply, String> {
         directories_first: request.get("directories_first").and_then(Value::as_bool).unwrap_or(false) };
     // Bind opaque continuation data to exactly the same filters/order.
     let mut signature = request.clone();
+    signature.as_object_mut().unwrap().insert("index_settings".into(), serde_json::to_value(engine.index_settings()).map_err(|e| e.to_string())?);
     for key in ["cursor", "id"] { signature.as_object_mut().unwrap().remove(key); }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     signature.to_string().hash(&mut hasher);

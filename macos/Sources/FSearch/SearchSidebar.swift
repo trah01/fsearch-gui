@@ -9,7 +9,7 @@ struct SearchSidebar: View {
         .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
 
     var body: some View {
-        ScrollView {
+        ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(FileCategory.sidebar) { category in
                     row(category.rawValue, symbol: category.symbol, selected: model.category == category) {
@@ -52,10 +52,9 @@ struct SearchSidebar: View {
                     }
                 }
             }
-            .padding(.leading, 12).padding(.trailing, 22).padding(.vertical, 4)
+            .padding(.horizontal, 12).padding(.vertical, 4)
         }
         .padding(.vertical, 8)
-        .padding(.bottom, 2)
         .onAppear(perform: refreshVolumes)
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in refreshVolumes() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in refreshVolumes() }

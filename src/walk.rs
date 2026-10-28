@@ -18,6 +18,11 @@ pub const NONE: u32 = u32::MAX;
 /// Access, where opening a consent-gated folder (Downloads, Desktop, ...)
 /// pops a privacy prompt and blocks the call until someone answers it.
 pub static SKIP: std::sync::OnceLock<Vec<Vec<u8>>> = std::sync::OnceLock::new();
+pub static EXCLUDED: std::sync::RwLock<Vec<Vec<u8>>> = std::sync::RwLock::new(Vec::new());
+
+fn excluded(path: &[u8]) -> bool {
+    EXCLUDED.read().unwrap().iter().any(|root| path.starts_with(root) && (path.len() == root.len() || path.get(root.len()) == Some(&b'/')))
+}
 
 /// Folders a scan was refused (EPERM): without Full Disk Access macOS also
 /// silently denies some, like ~/Library/Mail. Recorded only while paths are
@@ -60,6 +65,7 @@ pub fn yield_to_searches() {
 }
 
 pub fn blocked(path: &[u8]) -> bool {
+    if excluded(path) { return true; }
     if path == b"/Volumes" || path.starts_with(b"/Volumes/") {
         return true;
     }
@@ -280,10 +286,11 @@ pub fn external_volume(path: &[u8]) -> bool {
 }
 
 fn tracked_path(path: &[u8]) -> Option<Vec<u8>> {
-    (SKIP.get().is_some_and(|v| !v.is_empty()) || path == b"/" || path == b"/Volumes").then(|| path.to_vec())
+    (SKIP.get().is_some_and(|v| !v.is_empty()) || !EXCLUDED.read().unwrap().is_empty() || path == b"/" || path == b"/Volumes").then(|| path.to_vec())
 }
 
 fn blocked_scan(path: &[u8], external: bool) -> bool {
+    if excluded(path) { return true; }
     if external && path.starts_with(b"/Volumes/") {
         return SKIP.get().is_some_and(|v| v.iter().filter(|s| s.as_slice() != b"/Volumes").any(|s| {
             path.starts_with(s) && (path.len() == s.len() || path[s.len()] == b'/')

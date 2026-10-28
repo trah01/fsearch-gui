@@ -52,6 +52,9 @@ struct SearchResultsTable: NSViewRepresentable {
         table.target = context.coordinator
         table.doubleAction = #selector(Coordinator.openSelection)
         table.preview = { [weak coordinator = context.coordinator] in coordinator?.previewSelection() }
+        table.copyFile = { [weak coordinator = context.coordinator] in coordinator?.copyFileSelection() }
+        table.setDraggingSourceOperationMask(.copy, forLocal: false)
+        table.setDraggingSourceOperationMask(.copy, forLocal: true)
         table.menu = context.coordinator.makeMenu()
         context.coordinator.attach(table: table, scroll: scroll)
         return scroll
@@ -102,9 +105,17 @@ struct SearchResultsTable: NSViewRepresentable {
 
         func update() {
             guard let table else { return }
+            if table.rowHeight != AppAppearance.rowHeight {
+                table.rowHeight = AppAppearance.rowHeight
+                table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<table.numberOfRows))
+                scheduleViewport()
+            }
             if theme != AppearanceSettings.savedTheme {
                 theme = AppearanceSettings.savedTheme
-                table.enumerateAvailableRowViews { row, _ in row.needsDisplay = true }
+                table.enumerateAvailableRowViews { row, _ in
+                    row.needsDisplay = true
+                    for case let cell as ResultCell in row.subviews { cell.updateAppearance(selected: row.isSelected) }
+                }
                 table.needsDisplay = true
             }
             let descriptors = model.sort.map { [NSSortDescriptor(key: $0.column.rawValue, ascending: $0.ascending)] } ?? []
@@ -154,6 +165,17 @@ struct SearchResultsTable: NSViewRepresentable {
 
         func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
+        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+            guard rows.indices.contains(row) else { return nil }
+            return rows[row].fileURL as NSURL
+        }
+
+        func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet) {
+            guard let row = rowIndexes.first, rows.indices.contains(row) else { return }
+            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            model.selected = rows[row].path
+        }
+
         func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
             let view = FloatingResultRow()
             view.striped = row % 2 == 1
@@ -165,6 +187,7 @@ struct SearchResultsTable: NSViewRepresentable {
                   let column = ResultColumn(rawValue: identifier.rawValue) else { return nil }
             let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? ResultCell ?? ResultCell(column: column)
             cell.identifier = identifier
+            cell.updateAppearance(selected: tableView.selectedRow == row)
             let hit = rows[row]
             cell.moreAction = { [weak self] button in
                 guard let self, let table = self.table, let current = self.model.row(for: hit.path) else { return }
@@ -273,12 +296,13 @@ struct SearchResultsTable: NSViewRepresentable {
         @objc func openSelection() { if let selected { model.open(selected) } }
         @objc func previewSelection() { if let selected { preview(selected) } }
         @objc private func revealSelection() { if let selected { model.reveal(selected) } }
-        @objc private func copySelection() { if let selected { model.copyPath(selected) } }
+        @objc func copyFileSelection() { if let selected { model.copyFile(selected) } }
+        @objc private func copyPathSelection() { if let selected { model.copyPath(selected) } }
         @objc private func terminalSelection() { if let selected { model.openTerminal(selected) } }
 
         func makeMenu() -> NSMenu {
             let menu = NSMenu()
-            for (title, action) in [("打开", #selector(openSelection)), ("快速查看", #selector(previewSelection)), ("在访达中显示", #selector(revealSelection)), ("复制路径", #selector(copySelection)), ("在终端中打开", #selector(terminalSelection))] {
+            for (title, action) in [("打开", #selector(openSelection)), ("快速查看", #selector(previewSelection)), ("在访达中显示", #selector(revealSelection)), ("复制文件", #selector(copyFileSelection)), ("复制路径", #selector(copyPathSelection)), ("在终端中打开", #selector(terminalSelection))] {
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = self
                 menu.addItem(item)
@@ -300,6 +324,14 @@ struct SearchResultsTable: NSViewRepresentable {
 
 private final class ResultsTableView: NSTableView {
     var preview: (() -> Void)?
+    var copyFile: (() -> Void)?
+
+    @objc func copy(_ sender: Any?) { if selectedRow >= 0 { copyFile?() } }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copy(_:)) { return selectedRow >= 0 }
+        return super.validateUserInterfaceItem(item)
+    }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 49, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, selectedRow >= 0 {
             preview?()
@@ -319,6 +351,8 @@ private final class ResultCell: NSTableCellView {
     var subtitle: NSTextField?
     var moreAction: ((NSButton) -> Void)?
     private let column: ResultColumn
+    private var resultSelected = false
+    private var moreButton: NSButton?
     init(column: ResultColumn) {
         self.column = column
         super.init(frame: .zero)
@@ -371,6 +405,7 @@ private final class ResultCell: NSTableCellView {
             button.contentTintColor = .labelColor
             button.toolTip = "更多文件操作"
             button.setAccessibilityLabel("更多文件操作")
+            moreButton = button
             addSubview(button)
             NSLayoutConstraint.activate([
                 button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
@@ -385,10 +420,20 @@ private final class ResultCell: NSTableCellView {
             text.centerYAnchor.constraint(equalTo: centerYAnchor, constant: column == .name ? -10 : 0),
         ])
     }
+    func updateAppearance(selected: Bool) {
+        resultSelected = selected
+        let foreground = AppAppearance.nativeOnResultSelection
+        let secondary = foreground.withAlphaComponent(0.85)
+        textField?.textColor = selected ? (column == .name || column == .path ? foreground : secondary)
+            : (column == .name || column == .path ? AppAppearance.nativeText : AppAppearance.nativeMuted)
+        subtitle?.textColor = selected ? secondary : AppAppearance.nativeMuted
+        moreButton?.contentTintColor = selected ? foreground : .labelColor
+        needsDisplay = true
+    }
     @objc private func showMore(_ sender: NSButton) { moreAction?(sender) }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        if column == .kind {
+        if column == .kind && !resultSelected {
             AppAppearance.rowAlternate.setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 15), xRadius: 12, yRadius: 12).fill()
         }
@@ -398,6 +443,15 @@ private final class ResultCell: NSTableCellView {
 
 private final class FloatingResultRow: NSTableRowView {
     var striped = false
+    override var isSelected: Bool {
+        didSet {
+            for case let cell as ResultCell in subviews { cell.updateAppearance(selected: isSelected) }
+        }
+    }
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        (subview as? ResultCell)?.updateAppearance(selected: isSelected)
+    }
     override func drawBackground(in dirtyRect: NSRect) {
         if striped {
             AppAppearance.rowAlternate.setFill()
@@ -405,7 +459,7 @@ private final class FloatingResultRow: NSTableRowView {
         }
     }
     override func drawSelection(in dirtyRect: NSRect) {
-        AppAppearance.nativeSelection.setFill()
+        AppAppearance.nativeAccent.setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 14, yRadius: 14).fill()
     }
 }

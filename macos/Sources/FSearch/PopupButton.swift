@@ -46,13 +46,12 @@ struct PopupButton<Label: View>: View {
             if let active = chipActive {
                 content
                     .font(.system(size: 12))
-                    .foregroundStyle(emphasized ? AppAppearance.onAccent : AppAppearance.text)
+                    .foregroundStyle(emphasized || active ? AppAppearance.onAccent : AppAppearance.text)
                     .padding(.horizontal, 11).frame(height: 36)
                     .background {
-                        Capsule().fill(emphasized ? AppAppearance.accent
-                            : active ? AppAppearance.selection : AppAppearance.secondary)
+                        Capsule().fill(emphasized || active ? AppAppearance.selection : AppAppearance.secondary)
                     }
-                    .overlay(Capsule().strokeBorder(emphasized ? Color.white.opacity(0.25) : AppAppearance.border.opacity(0.75), lineWidth: 1))
+                    .overlay(Capsule().strokeBorder(emphasized || active ? AppAppearance.onAccent.opacity(0.25) : AppAppearance.border.opacity(0.75), lineWidth: 1))
                     .shadow(color: AppAppearance.shadow.opacity(0.5), radius: 6, x: 0, y: 3)
                     .contentShape(Capsule())
             } else { content }

@@ -55,7 +55,12 @@ final class AppearanceSettings: ObservableObject {
         didSet { UserDefaults.standard.set(theme.rawValue, forKey: Self.themeKey) }
     }
 
+    @Published var compactRows: Bool {
+        didSet { UserDefaults.standard.set(compactRows, forKey: "FSearch.compactRows") }
+    }
+
     private init() {
+        compactRows = UserDefaults.standard.bool(forKey: "FSearch.compactRows")
         mode = AppearanceMode(rawValue: UserDefaults.standard.string(forKey: Self.modeKey) ?? "") ?? .system
         theme = Self.savedTheme
     }
@@ -64,52 +69,26 @@ final class AppearanceSettings: ObservableObject {
         ThemeColor(rawValue: UserDefaults.standard.string(forKey: themeKey) ?? "") ?? .blue
     }
     func applyAppearance() { NSApp.appearance = mode.nativeAppearance }
-    func reset() { mode = .system; theme = .blue }
-}
-
-private enum SettingsPage: String, CaseIterable, Identifiable {
-    case search = "搜索", appearance = "外观", storage = "存储与索引"
-    var id: String { rawValue }
-    var symbol: String {
-        switch self {
-        case .search: return "magnifyingglass"
-        case .appearance: return "paintpalette"
-        case .storage: return "externaldrive"
-        }
-    }
+    func reset() { mode = .system; theme = .blue; compactRows = false }
 }
 
 struct AppSettingsView: View {
     @ObservedObject var permissions: StoragePermissions
     @ObservedObject private var appearance = AppearanceSettings.shared
-    @State private var page: SettingsPage? = .search
 
     var body: some View {
-        HStack(spacing: 0) {
-            List(selection: $page) {
-                ForEach(SettingsPage.allCases) { page in
-                    Label(page.rawValue, systemImage: page.symbol)
-                        .padding(.vertical, 5)
-                        .tag(page)
-                }
-            }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            .padding(.top, 12)
-            .frame(width: 148)
-            .background(.regularMaterial)
-            .accessibilityLabel("设置分类")
-            Divider()
-            Group {
-                switch page {
-                case .search, .none: SearchSettingsView()
-                case .appearance: AppearanceSettingsView()
-                case .storage: StorageSettingsView(permissions: permissions)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        TabView {
+            GeneralSettingsView()
+                .tabItem { Label("通用", systemImage: "gearshape") }
+            SearchSettingsView()
+                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+            StorageSettingsView(permissions: permissions)
+                .tabItem { Label("索引", systemImage: "externaldrive") }
+            AppearanceSettingsView()
+                .tabItem { Label("外观", systemImage: "paintpalette") }
         }
-        .frame(width: 640, height: 540)
+        .padding(.top, 8)
+        .frame(width: 700, height: 560)
         .background(AppAppearance.background)
         .tint(AppAppearance.accent)
         .onAppear { appearance.applyAppearance() }
@@ -118,41 +97,43 @@ struct AppSettingsView: View {
 
 private struct AppearanceSettingsView: View {
     @ObservedObject private var appearance = AppearanceSettings.shared
+    @AppStorage("FSearch.showSidebar") private var showSidebar = true
+    @AppStorage("FSearch.showInspector") private var showInspector = true
 
     var body: some View {
-        Form {
-            Section {
-                HStack {
-                    Text("外观")
-                    Spacer()
+        SettingsPane {
+            VStack(spacing: 12) {
+                SettingsRow("外观") {
                     Picker("外观", selection: $appearance.mode) {
-                        ForEach(AppearanceMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
+                        ForEach(AppearanceMode.allCases) { Text($0.rawValue).tag($0) }
+                    }.labelsHidden().pickerStyle(.segmented).frame(width: 280)
+                }
+                SettingsRow("强调色") {
+                    HStack(spacing: 8) {
+                        ForEach(ThemeColor.allCases) { themeSwatch($0) }
                     }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 280)
                 }
             }
-            Section {
-                HStack {
-                    Text("主题色")
-                    Spacer()
-                    HStack(spacing: 10) {
-                        ForEach(ThemeColor.allCases) { theme in
-                            themeSwatch(theme)
-                        }
-                    }
-                }.padding(.vertical, 4)
-
+            Divider()
+            VStack(spacing: 12) {
+                SettingsRow("列表行距") {
+                    Picker("列表行距", selection: $appearance.compactRows) {
+                        Text("标准").tag(false)
+                        Text("紧凑").tag(true)
+                    }.labelsHidden().pickerStyle(.segmented).frame(width: 180)
+                }
+                SettingsRow("显示左侧栏") {
+                    Toggle("显示左侧栏", isOn: $showSidebar).labelsHidden().toggleStyle(.switch)
+                }
+                SettingsRow("显示文件详情") {
+                    Toggle("显示文件详情", isOn: $showInspector).labelsHidden().toggleStyle(.switch)
+                }
             }
             HStack {
                 Spacer()
-                Button("恢复默认", action: appearance.reset)
-            }.listRowBackground(Color.clear)
+                Button("恢复外观默认设置") { appearance.reset(); showSidebar = true; showInspector = true }
+            }
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .padding(12)
     }
 
     private func themeSwatch(_ theme: ThemeColor) -> some View {

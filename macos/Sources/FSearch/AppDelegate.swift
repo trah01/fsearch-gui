@@ -12,9 +12,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = NSImage(contentsOf: icon)
         }
         NSApp.activate(ignoringOtherApps: true)
+        GeneralSettings.shared.activate { [weak self] in
+            self?.showSearchWindow()
+            NotificationCenter.default.post(name: .focusSearchField, object: nil)
+        }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        GeneralSettings.shared.quitWhenClosed
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showSearchWindow()

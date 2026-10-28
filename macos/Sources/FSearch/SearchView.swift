@@ -8,6 +8,7 @@ struct SearchView: View {
     @State private var searchFocus = 0
     @State private var previewURL: URL?
     @State private var showScopeEditor = false
+    @State private var showAdvancedFilters = false
     @State private var scopeDraft = ""
     @FocusState private var extensionsFocused: Bool
     @AppStorage("FSearch.showSidebar") private var showSidebar = true
@@ -16,38 +17,56 @@ struct SearchView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            HStack(alignment: .top, spacing: 12) {
+            let sidebarWidth = geometry.size.width < 1100 ? 208 : min(260, geometry.size.width * 0.19)
+            let inspectorWidth: CGFloat = showInspector && geometry.size.width >= 1100
+                ? (geometry.size.width < 1250 ? 264 : min(332, geometry.size.width * 0.23)) : 0
+            let contentLeadingEdge = showSidebar ? sidebarWidth + 1 : 0
+            let contentTrailingEdge = geometry.size.width - (inspectorWidth > 0 ? inspectorWidth + 1 : 0) - 16
+            HStack(alignment: .top, spacing: 0) {
                 if showSidebar {
                     SearchSidebar(model: model)
-                        .frame(width: geometry.size.width < 1100 ? 208 : min(260, geometry.size.width * 0.19))
+                        .frame(width: sidebarWidth)
+                    Divider()
                 }
                 VStack(spacing: 0) {
-                    searchBar.padding(.top, 12)
                     filterBar
+                    Divider()
                     results
+                    Divider()
                     statusBar
                 }
-                .floatingSurface(radius: 26, shadow: false)
                 .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-                if showInspector && geometry.size.width >= 1100 {
+                .background(AppAppearance.panel)
+                if inspectorWidth > 0 {
+                    Divider()
                     FileInspector(hit: model.selectedHit, model: model, preview: preview)
-                        .floatingSurface()
-                        .padding(.bottom, 12)
-                        .frame(width: geometry.size.width < 1250 ? 264 : min(332, geometry.size.width * 0.23))
+                        .frame(width: inspectorWidth)
+                        .frame(maxHeight: .infinity)
                 }
             }
-            .padding(.leading, 6)
-            .padding(.trailing, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 2)
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) { windowActions }
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    HStack(spacing: 4) {
+                        sidebarToggle
+                        windowActions
+                    }
+                }
+                ToolbarItem(placement: .navigation) {
+                    ColumnAlignedToolbarItem(leadingEdge: contentLeadingEdge, trailingEdge: contentTrailingEdge,
+                                             height: AppAppearance.searchHeight) {
+                        HStack(spacing: 8) {
+                            searchBar.frame(maxWidth: .infinity)
+                            displayControls.fixedSize()
+                        }
+                    }
+                }
+            }
         }
         .background(SearchBackdrop().ignoresSafeArea())
         .foregroundStyle(AppAppearance.text)
         .tint(AppAppearance.accent)
         .onAppear { model.search() }
+        .onReceive(NotificationCenter.default.publisher(for: .focusSearchField)) { _ in searchFocus += 1 }
         .onReceive(NotificationCenter.default.publisher(for: .searchEngineReloaded)) { _ in model.search() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in model.search() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in model.search() }
@@ -74,7 +93,6 @@ struct SearchView: View {
 
     private var windowActions: some View {
         HStack(spacing: 4) {
-            sidebarToggle
             PopupButton(actions: [
                 PopupAction("选择搜索文件夹…", perform: model.chooseFolder),
                 PopupAction("清除筛选", perform: model.resetFilters),
@@ -93,25 +111,41 @@ struct SearchView: View {
                 .accessibilityLabel(showInspector ? "隐藏文件详情" : "显示文件详情")
                 .keyboardShortcut("i", modifiers: [.control, .command])
         }
-        .padding(.horizontal, 6)
     }
 
     private var searchBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").font(.system(size: 19, weight: .regular))
-                .foregroundStyle(AppAppearance.text.opacity(0.85)).accessibilityHidden(true)
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15)).foregroundStyle(AppAppearance.muted)
+                .frame(width: 18).accessibilityHidden(true)
             NativeSearchField(text: $model.query, focus: searchFocus,
                 compositionChanged: model.setQueryComposition, submit: model.search)
-                .frame(maxWidth: .infinity).frame(height: 28)
+                .frame(maxWidth: .infinity).frame(height: 22)
+            if !model.query.isEmpty {
+                Button { model.query = ""; searchFocus += 1 } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(AppAppearance.muted).frame(width: 20, height: 24)
+                }
+                .buttonStyle(.plain).help("清除搜索").accessibilityLabel("清除搜索")
+            }
+            Divider().frame(height: 16).padding(.horizontal, 2)
+            Button { showAdvancedFilters.toggle() } label: {
+                Text("高级筛选")
+            }
+            .buttonStyle(AdvancedSearchButtonStyle(active: model.hasActiveFilters || showAdvancedFilters))
+            .fixedSize()
+            .help("设置文件名、类型、大小、修改时间和搜索位置")
+            .accessibilityValue(model.hasActiveFilters ? "已启用筛选" : "未启用筛选")
+            .popover(isPresented: $showAdvancedFilters, arrowEdge: .bottom) {
+                AdvancedSearchView(model: model)
+            }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 10)
         .frame(height: AppAppearance.searchHeight)
         .background(AppAppearance.panel, in: RoundedRectangle(cornerRadius: AppAppearance.searchCorner, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: AppAppearance.searchCorner, style: .continuous)
             .strokeBorder(AppAppearance.border, lineWidth: 1.2)
             .allowsHitTesting(false))
-        .shadow(color: AppAppearance.shadow.opacity(0.7), radius: 10, x: 0, y: 4)
-        .padding(.horizontal, 18).padding(.bottom, 12)
     }
 
     private var filterBar: some View {
@@ -125,23 +159,28 @@ struct SearchView: View {
                     if category == .custom { proxy.scrollTo("extensions", anchor: .trailing) }
                 }
             }
-            displayControls.fixedSize()
+            directoriesFirstButton.fixedSize()
+            PopupButton(actions: sortActions) { Text(model.sort?.column.title ?? "按相关性") }
+                .filterChip(active: false)
+                .fixedSize()
+                .help("对全部结果排序")
+                .accessibilityLabel("排序")
         }
         .frame(height: 44)
-        .padding(.horizontal, 12).padding(.bottom, 14)
+        .padding(.horizontal, 12).padding(.vertical, 6)
     }
 
     private var filterChoices: some View {
         HStack(spacing: 8) {
             scopeButton
             PopupButton(actions: TimeFilter.allCases.map { filter in
-                PopupAction(filter.rawValue, selected: model.timeFilter == filter) { model.timeFilter = filter }
-            }) { Text(model.timeFilter.rawValue) }
-            .filterChip(active: model.timeFilter != .any)
+                PopupAction(filter.rawValue, selected: !model.advancedFilters.hasTime && model.timeFilter == filter) { model.timeFilter = filter }
+            }) { Text(model.timeFilterTitle) }
+            .filterChip(active: model.timeFilter != .any || model.advancedFilters.hasTime)
             PopupButton(actions: SizeFilter.allCases.map { filter in
-                PopupAction(filter.rawValue, selected: model.sizeFilter == filter) { model.sizeFilter = filter }
-            }) { Text(model.sizeFilter == .any ? "大小" : model.sizeFilter == .large ? ">100 MB" : "<1 MB") }
-            .filterChip(active: model.sizeFilter != .any)
+                PopupAction(filter.rawValue, selected: !model.advancedFilters.hasSize && model.sizeFilter == filter) { model.sizeFilter = filter }
+            }) { Text(model.sizeFilterTitle) }
+            .filterChip(active: model.sizeFilter != .any || model.advancedFilters.hasSize)
             PopupButton(actions: FileCategory.allCases.map { category in
                 PopupAction(category.rawValue, selected: model.category == category) { model.category = category }
             }) { Text(model.category == .all ? "所有类型" : model.category.rawValue) }
@@ -187,27 +226,26 @@ struct SearchView: View {
             }
     }
 
+    private var directoriesFirstButton: some View {
+        Button { model.setDirectoriesFirst(!model.directoriesFirst) } label: {
+            Text("目录优先").font(.system(size: 12))
+                .foregroundStyle(model.directoriesFirst ? AppAppearance.onAccent : AppAppearance.text)
+                .padding(.horizontal, 10).frame(height: 36)
+                .background(model.directoriesFirst ? AppAppearance.selection : AppAppearance.secondary, in: Capsule())
+                .overlay(Capsule().strokeBorder(AppAppearance.border.opacity(0.75), lineWidth: 1))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(model.directoriesFirst ? "开启" : "关闭")
+        .help("将目录排在文件前面")
+    }
+
     private var displayControls: some View {
-        HStack(spacing: 10) {
-            Button { model.setDirectoriesFirst(!model.directoriesFirst) } label: {
-                Text("目录优先").font(.system(size: 12))
-                    .foregroundStyle(model.directoriesFirst ? AppAppearance.accent : AppAppearance.text)
-                    .padding(.horizontal, 10).frame(height: 36)
-                    .background(model.directoriesFirst ? AppAppearance.selection : AppAppearance.secondary, in: Capsule())
-                    .overlay(Capsule().strokeBorder(AppAppearance.border.opacity(0.75), lineWidth: 1))
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(model.directoriesFirst ? "开启" : "关闭")
-            .help("将目录排在文件前面")
-            PopupButton(actions: sortActions) { Text(model.sort?.column.title ?? "按相关性") }
-                .filterChip(active: false)
-                .help("对全部结果排序")
+        HStack(spacing: 8) {
             HStack(spacing: 0) {
                 displayButton("list.bullet", title: "列表视图", selected: !gridView) { gridView = false }
                 displayButton("square.grid.2x2", title: "网格视图", selected: gridView) { gridView = true }
             }
-            .padding(3).floatingSurface(radius: 18)
         }
     }
 
@@ -228,9 +266,9 @@ struct SearchView: View {
 
     private func displayButton(_ symbol: String, title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).frame(width: 30, height: 30)
-                .background(selected ? AppAppearance.selection : .clear, in: RoundedRectangle(cornerRadius: 12))
-        }.buttonStyle(.plain).accessibilityLabel(title).help(title)
+            Image(systemName: symbol)
+        }.buttonStyle(WindowToolbarButtonStyle(active: selected, selected: selected))
+            .accessibilityLabel(title).accessibilityAddTraits(selected ? .isSelected : []).help(title)
     }
 
     private var results: some View {
@@ -238,7 +276,6 @@ struct SearchView: View {
             if gridView { SearchResultsGrid(model: model, preview: preview) }
             else { SearchResultsTable(model: model, preview: preview) }
         }
-        .padding(.horizontal, 10)
         .overlay {
             if model.hits.isEmpty {
                 VStack(spacing: 14) {
@@ -283,6 +320,27 @@ struct SearchView: View {
         }
         .font(.system(size: 11)).foregroundStyle(.secondary).buttonStyle(.borderless)
         .padding(.horizontal, 18).frame(height: 36)
+    }
+}
+
+private struct AdvancedSearchButtonStyle: ButtonStyle {
+    let active: Bool
+    @State private var hovered = false
+    @Environment(\.isFocused) private var focused
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(active ? AppAppearance.onAccent : AppAppearance.text)
+            .padding(.horizontal, 8).frame(height: 26)
+            .background(active ? AppAppearance.selection : Color.primary.opacity(configuration.isPressed ? 0.14 : hovered ? 0.08 : 0),
+                        in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(focused ? AppAppearance.accent : .clear, lineWidth: 1))
+            .opacity(enabled ? (active && configuration.isPressed ? 0.8 : 1) : 0.4)
+            .contentShape(Rectangle())
+            .onHover { hovered = $0 }
     }
 }
 

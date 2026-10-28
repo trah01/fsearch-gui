@@ -3,6 +3,7 @@ import SwiftUI
 
 extension Notification.Name {
     static let searchEngineReloaded = Notification.Name("FSearch.searchEngineReloaded")
+    static let focusSearchField = Notification.Name("FSearch.focusSearchField")
 }
 
 struct StorageVolume: Identifiable {
@@ -12,6 +13,7 @@ struct StorageVolume: Identifiable {
     let included: Bool
     let building: Bool
     let entries: Int?
+    let updated: Date?
     let error: String?
     var id: String { path }
     var status: String {
@@ -31,6 +33,11 @@ final class StoragePermissions: ObservableObject {
     @Published var internalBuilding = false
     @Published var internalCompleted: Date?
     @Published var internalError: String?
+    @Published var internalEntries: Int?
+    @Published var internalUpdated: Date?
+    @Published private(set) var automatic = true
+    @Published private(set) var excludedFolders: [String] = []
+    @Published private(set) var supportsSettings = false
     @Published var error: String?
     private let client: SearchClient
     private let bookmarkKey = "FSearch.storageAccessBookmarks"
@@ -80,7 +87,14 @@ final class StoragePermissions: ObservableObject {
             let internalIndex = response["internal"] as? [String: Any] ?? [:]
             internalBuilding = internalIndex["building"] as? Bool ?? false
             internalError = internalIndex["error"] as? String
+            internalEntries = internalIndex["entries"] as? Int
+            internalUpdated = (internalIndex["updated_at"] as? NSNumber).flatMap { $0.doubleValue > 0 ? Date(timeIntervalSince1970: $0.doubleValue) : nil }
             internalCompleted = (internalIndex["indexed_at"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
+            if let settings = response["settings"] as? [String: Any] {
+                supportsSettings = true
+                automatic = settings["automatic"] as? Bool ?? true
+                excludedFolders = settings["excluded"] as? [String] ?? []
+            } else { supportsSettings = false }
             var rows: [StorageVolume] = []
             for value in response["volumes"] as? [[String: Any]] ?? [] {
                 guard let path = value["path"] as? String, let name = value["name"] as? String else { continue }
@@ -95,6 +109,7 @@ final class StoragePermissions: ObservableObject {
                     included: value["included"] as? Bool ?? false,
                     building: value["building"] as? Bool ?? false,
                     entries: value["entries"] as? Int,
+                    updated: (value["indexed_at"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) },
                     error: value["error"] as? String))
             }
             volumes = rows
@@ -173,94 +188,217 @@ final class StoragePermissions: ObservableObject {
     }
 
     func showApplication() { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
+
+    func setAutomatic(_ enabled: Bool) {
+        updateSettings(automatic: enabled, excluded: excludedFolders)
+    }
+
+    func addExcludedFolders() {
+        let panel = NSOpenPanel()
+        panel.title = "排除文件夹"
+        panel.prompt = "排除"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = false
+        panel.allowsMultipleSelection = true
+        guard panel.runModal() == .OK else { return }
+        let paths = panel.urls.map { $0.standardizedFileURL.path }
+        updateSettings(automatic: automatic, excluded: Array(Set(excludedFolders + paths)).sorted())
+    }
+
+    func removeExcludedFolder(_ path: String) {
+        updateSettings(automatic: automatic, excluded: excludedFolders.filter { $0 != path })
+    }
+
+    private func updateSettings(automatic: Bool, excluded: [String]) {
+        guard !busy, supportsSettings else { return }
+        busy = true
+        error = nil
+        Task {
+            defer { busy = false }
+            do {
+                _ = try await checked(["op": "index-settings", "settings": ["automatic": automatic, "excluded": excluded]])
+                await readStatus()
+                NotificationCenter.default.post(name: .searchEngineReloaded, object: nil)
+            } catch { self.error = error.localizedDescription }
+        }
+    }
 }
 
 struct StorageSettingsView: View {
     @ObservedObject var permissions: StoragePermissions
+    @ObservedObject private var appearance = AppearanceSettings.shared
+    @State private var selectedDisk = "/"
+    @State private var selectedExclusion: String?
+
+    private var selectedVolume: StorageVolume? { permissions.volumes.first { $0.path == selectedDisk } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        SettingsPane {
+            VStack(alignment: .leading, spacing: 10) {
+                SettingsRow("自动更新内置硬盘索引") {
+                    Toggle("自动更新内置硬盘索引", isOn: Binding(get: { permissions.automatic }, set: permissions.setAutomatic))
+                        .labelsHidden().toggleStyle(.switch)
+                        .disabled(permissions.busy || !permissions.supportsSettings)
+                }
+                SettingsNote("内置硬盘随文件变化更新；外置磁盘和网络磁盘通过“更新索引”更新。")
+                if !permissions.supportsSettings && !permissions.busy && permissions.fullAccess != nil {
+                    HStack {
+                        SettingsNote("当前搜索引擎需要重新载入，才能使用新的索引设置。")
+                        Spacer()
+                        Button("重新载入") { Task { await permissions.reload() } }
+                            .disabled(permissions.indexing)
+                    }
+                }
+            }
+            Divider()
+            diskSection
+            Divider()
+            exclusionsSection
+            Divider()
+            permissionSection
+            if let error = permissions.error {
+                Text(error).font(.system(size: 12)).foregroundStyle(.red).textSelection(.enabled)
+            }
+        }
+        .task {
+            await permissions.refresh()
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+                await permissions.refresh(verifyAccess: false)
+            }
+        }
+        .onChange(of: permissions.volumes.map(\.path)) { paths in
+            if selectedDisk != "/" && !paths.contains(selectedDisk) { selectedDisk = "/" }
+        }
+    }
+
+    private var diskSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("存储与索引").font(.headline)
+                Text("磁盘").fontWeight(.medium)
                 Spacer()
                 if permissions.busy { ProgressView().controlSize(.small) }
-                Button("检查权限") { Task { await permissions.refresh() } }.disabled(permissions.busy)
+                Button("刷新") { Task { await permissions.refresh() } }.disabled(permissions.busy)
             }
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("完全磁盘访问")
-                    Spacer()
-                    Text(permissions.fullAccess == nil ? "尚未检查" : permissions.fullAccess == true ? "已授权" : "未授权").foregroundStyle(.secondary)
-                    Button("申请权限", action: permissions.requestFullAccess)
+            VStack(spacing: 0) {
+                diskRow("内置硬盘", path: "/", symbol: "internaldrive",
+                    status: permissions.internalBuilding ? "正在更新…" : permissions.internalUpdated == nil ? "尚未就绪" : permissions.automatic ? "实时更新" : "已暂停自动更新",
+                    entries: permissions.internalEntries, updated: permissions.internalUpdated ?? permissions.internalCompleted)
+                ForEach(permissions.volumes) { volume in
+                    Divider()
+                    diskRow(volume.name, path: volume.path, symbol: "externaldrive",
+                        status: volume.status, entries: volume.entries, updated: volume.updated)
                 }
-                Text("用于读取内置硬盘中的受保护文件夹。").font(.callout).foregroundStyle(.secondary)
+            }
+            HStack {
+                if let volume = selectedVolume {
+                    Text(volume.path).font(.system(size: 12)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(volume.path)
+                }
+                Spacer()
+                if let volume = selectedVolume, volume.readable != true {
+                    Button("允许访问") { permissions.requestVolumeAccess(volume) }
+                        .disabled(permissions.busy || volume.building)
+                }
+                Button("更新索引") { Task { await permissions.rebuild(selectedVolume) } }
+                    .disabled(permissions.busy || (selectedVolume.map { $0.building || $0.readable != true } ?? permissions.internalBuilding))
+            }
+            if let error = selectedVolume?.error ?? (selectedDisk == "/" ? permissions.internalError : nil) {
+                Text(error).font(.system(size: 12)).foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func diskRow(_ title: String, path: String, symbol: String, status: String, entries: Int?, updated: Date?) -> some View {
+        let selected = selectedDisk == path
+        let secondary = selected ? AppAppearance.onAccent.opacity(0.85) : AppAppearance.muted
+        return Button { selectedDisk = path } label: {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).font(.system(size: 22)).foregroundStyle(secondary)
+                    .frame(width: 30).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).lineLimit(1)
+                    HStack(spacing: 10) {
+                        if let entries { Text("\(entries.formatted()) 项") }
+                        if let updated { Text(updated.formatted(date: .numeric, time: .shortened)) }
+                    }.font(.system(size: 11)).foregroundStyle(secondary)
+                }
+                Spacer(minLength: 12)
+                Text(status).font(.system(size: 12)).foregroundStyle(secondary).lineLimit(2)
+            }
+            .foregroundStyle(selected ? AppAppearance.onAccent : AppAppearance.text)
+            .padding(.horizontal, 10).frame(height: 65)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? AppAppearance.selection : .clear,
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selectedDisk == path ? .isSelected : [])
+    }
+
+    private var exclusionsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("排除文件夹").fontWeight(.medium)
+                Spacer()
+                Button("移除") {
+                    if let selectedExclusion { permissions.removeExcludedFolder(selectedExclusion); self.selectedExclusion = nil }
+                }.disabled(selectedExclusion == nil || permissions.busy || !permissions.supportsSettings)
+                Button("添加…", action: permissions.addExcludedFolders)
+                    .disabled(permissions.busy || !permissions.supportsSettings)
+            }
+            if permissions.excludedFolders.isEmpty {
+                SettingsNote("未排除任何文件夹")
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(permissions.excludedFolders, id: \.self) { path in
+                        Button { selectedExclusion = path } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "folder")
+                                    .foregroundStyle(selectedExclusion == path ? AppAppearance.onAccent.opacity(0.85) : AppAppearance.muted)
+                                Text(path).lineLimit(1).truncationMode(.middle)
+                                Spacer(minLength: 0)
+                            }
+                            .foregroundStyle(selectedExclusion == path ? AppAppearance.onAccent : AppAppearance.text)
+                            .padding(.horizontal, 10).frame(height: 32)
+                            .background(selectedExclusion == path ? AppAppearance.selection : .clear)
+                            .contentShape(Rectangle())
+                        }.buttonStyle(.plain).help(path)
+                            .accessibilityAddTraits(selectedExclusion == path ? .isSelected : [])
+                    }
+                }
+            }
+            SettingsNote("排除后立即从搜索结果隐藏，并停止扫描文件夹内的内容。移除排除项后，请更新所在磁盘的索引。")
+        }
+    }
+
+    private var permissionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsRow("完全磁盘访问") {
+                Text(permissions.fullAccess == nil ? "正在检查…" : permissions.fullAccess == true ? "已允许" : "未允许")
+                    .foregroundStyle(.secondary)
+                if permissions.fullAccess == true && permissions.activeAccess {
+                    Menu("权限选项") {
+                        Button("检查权限") { Task { await permissions.refresh() } }
+                        Button("显示应用位置", action: permissions.showApplication)
+                        Button("重新载入权限") { Task { await permissions.reload() } }
+                    }.fixedSize().disabled(permissions.busy || permissions.indexing)
+                } else {
+                    Button("打开系统设置", action: permissions.requestFullAccess)
+                }
+            }
+            if permissions.fullAccess != true || !permissions.activeAccess {
                 HStack {
+                    if permissions.fullAccess == true {
+                        SettingsNote("权限已更新，请重新载入。")
+                    }
                     Spacer()
                     Button("显示应用位置", action: permissions.showApplication)
                     Button("重新载入权限") { Task { await permissions.reload() } }
                         .disabled(permissions.busy || permissions.indexing)
                 }
-                if permissions.fullAccess == true && !permissions.activeAccess {
-                    Text("权限已更新，请重新载入权限。").font(.callout).foregroundStyle(.secondary)
-                }
-            }
-            Divider()
-            HStack {
-                Text("内置硬盘").font(.headline)
-                Spacer()
-                if permissions.internalBuilding {
-                    ProgressView().controlSize(.small)
-                    Text("正在重建索引…").foregroundStyle(.secondary)
-                } else if let date = permissions.internalCompleted {
-                    Text(date.formatted(date: .numeric, time: .shortened)).font(.callout).foregroundStyle(.secondary)
-                }
-                Button("重建索引") { Task { await permissions.rebuild() } }
-                    .disabled(permissions.busy || permissions.internalBuilding)
-            }
-            if let error = permissions.internalError { Text(error).font(.callout).foregroundStyle(.red) }
-            Divider()
-            HStack {
-                Text("已挂载的磁盘").font(.headline)
-                Spacer()
-                Text("\(permissions.volumes.count) 个").foregroundStyle(.secondary)
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if permissions.volumes.isEmpty {
-                        Text("未发现已挂载的外置磁盘").foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    ForEach(permissions.volumes) { volume in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "externaldrive").foregroundStyle(.secondary).accessibilityHidden(true)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(volume.name).lineLimit(1)
-                                    Text(volume.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                                Text(volume.status).font(.callout).foregroundStyle(.secondary)
-                                    .frame(maxWidth: 110, alignment: .trailing).lineLimit(2)
-                            }
-                            HStack {
-                                Spacer()
-                                Button(volume.readable == true ? "已允许访问" : "申请权限") { permissions.requestVolumeAccess(volume) }
-                                    .disabled(permissions.busy || volume.readable == true)
-                                Button("重建索引") { Task { await permissions.rebuild(volume) } }
-                                    .disabled(permissions.busy || volume.building || volume.readable != true)
-                            }
-                            if let error = volume.error { Text(error).font(.callout).foregroundStyle(.red) }
-                        }
-                    }
-                }
-            }
-            if let error = permissions.error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
-        }
-        .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppAppearance.background)
-        .task {
-            await permissions.refresh()
-            while !Task.isCancelled {
-                do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
-                if permissions.indexing { await permissions.refresh(verifyAccess: false) }
             }
         }
     }
