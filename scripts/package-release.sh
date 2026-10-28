@@ -20,14 +20,14 @@ case "$ARCHS" in
     *) printf '不支持的架构：%s\n' "$ARCHS" >&2; exit 1 ;;
 esac
 DIST_DIR="$PROJECT_DIR/build/release"
-ASSET="FSearch-$VERSION-$ARCH"
+ASSET="FSearch-gui-$VERSION-$ARCH"
 mkdir -p "$DIST_DIR"
 ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$DIST_DIR/$ASSET.zip"
 DMG_STAGE="$(mktemp -d "$PROJECT_DIR/build/dmg.XXXXXX")"
 trap 'rm -rf "$DMG_STAGE"' EXIT
 ditto "$APP_DIR" "$DMG_STAGE/FSearch.app"
 ln -s /Applications "$DMG_STAGE/Applications"
-hdiutil create -volname "FSearch $VERSION" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DIST_DIR/$ASSET.dmg"
+hdiutil create -volname "FSearch-gui $VERSION" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DIST_DIR/$ASSET.dmg"
 (
     cd "$DIST_DIR"
     shasum -a 256 "$ASSET.zip" "$ASSET.dmg" > "$ASSET.sha256"

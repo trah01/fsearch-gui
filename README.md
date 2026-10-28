@@ -1,4 +1,4 @@
-# FSearch for macOS
+# FSearch-gui for macOS
 
 [简体中文](README.md) | [English](README.en.md)
 
@@ -8,11 +8,11 @@
 
 ### 浅色模式
 
-![FSearch 浅色模式：左侧分类与位置、中间搜索结果、右侧文件详情](docs/screenshots/main-window-light.png)
+![FSearch-gui 浅色模式：左侧分类与位置、中间搜索结果、右侧文件详情](docs/screenshots/main-window-light.png)
 
 ### 深色模式
 
-![FSearch 深色模式：搜索、高级筛选与文件详情](docs/screenshots/main-window-dark.png)
+![FSearch-gui 深色模式：搜索、高级筛选与文件详情](docs/screenshots/main-window-dark.png)
 
 ## 主要功能
 
@@ -32,7 +32,7 @@
 
 需要 **macOS 13 或更新版本**，发行安装包同时支持 Apple Silicon 和 Intel Mac。
 
-前往 [GitHub Releases](https://github.com/trah01/fsearch-gui/releases) 下载 DMG，打开后将 FSearch 拖入“应用程序”文件夹。安装后可在“设置 → 关于”中检查更新，也可从应用菜单选择“检查更新…”。
+前往 [GitHub Releases](https://github.com/trah01/fsearch-gui/releases) 下载 DMG，打开后将 FSearch-gui 拖入“应用程序”文件夹。安装后可在“设置 → 关于”中检查更新，也可从应用菜单选择“检查更新…”。
 
 ### 从源码构建
 
@@ -50,7 +50,7 @@ open build/FSearch.app
 ### 首次使用
 
 1. **等待首次索引完成**：首次启动需要建立索引；如果提示索引尚未就绪，稍后点击“重试”。
-2. **检查访问权限**：打开“设置 → 索引”。如需搜索内置硬盘中的受保护文件夹，在系统设置的“隐私与安全性 → 完全磁盘访问权限”中添加并启用 FSearch，再回到应用点击“重新载入权限”。
+2. **检查访问权限**：打开“设置 → 索引”。如需搜索内置硬盘中的受保护文件夹，在系统设置的“隐私与安全性 → 完全磁盘访问权限”中添加并启用 FSearch-gui，再回到应用点击“重新载入权限”。
 3. **添加其他磁盘**：选中外置磁盘或网络磁盘，点击“允许访问”并选择该磁盘的根目录，再点击“更新索引”。磁盘断开后不会返回其搜索结果，重新连接后可继续使用已有索引。
 
 ## 搜索与筛选

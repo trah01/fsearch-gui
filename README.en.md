@@ -1,4 +1,4 @@
-# FSearch for macOS
+# FSearch-gui for macOS
 
 [简体中文](README.md) | [English](README.en.md)
 
@@ -10,11 +10,11 @@ The interface is available in English and Simplified Chinese, with automatic sys
 
 ### Light mode
 
-![FSearch in light mode: categories and locations on the left, results in the middle, and file details on the right](docs/screenshots/main-window-light.png)
+![FSearch-gui in light mode: categories and locations on the left, results in the middle, and file details on the right](docs/screenshots/main-window-light.png)
 
 ### Dark mode
 
-![FSearch in dark mode: search, advanced filters, and file details](docs/screenshots/main-window-dark.png)
+![FSearch-gui in dark mode: search, advanced filters, and file details](docs/screenshots/main-window-dark.png)
 
 ## Features
 
@@ -34,7 +34,7 @@ Use the toolbar buttons to open or close either sidebar. The window widens when 
 
 Requires **macOS 13 or later**. Release packages support both Apple Silicon and Intel Macs.
 
-Download a DMG from [GitHub Releases](https://github.com/trah01/fsearch-gui/releases), open it, and drag FSearch into Applications. After installation, check for updates in Settings → About (设置 → 关于) or choose Check for Updates (检查更新…) from the app menu.
+Download a DMG from [GitHub Releases](https://github.com/trah01/fsearch-gui/releases), open it, and drag FSearch-gui into Applications. After installation, check for updates in Settings → About (设置 → 关于) or choose Check for Updates (检查更新…) from the app menu.
 
 ### Building from source
 
@@ -51,8 +51,8 @@ The app is created at `build/FSearch.app`. You can copy it to your Applications 
 
 ### First launch
 
-1. **Wait for the initial index**: FSearch needs to build an index on first launch. If the index is not ready, wait a moment and click Retry (重试).
-2. **Check access permissions**: Open Settings → Index (设置 → 索引). To search protected folders on internal storage, add and enable FSearch in System Settings → Privacy & Security → Full Disk Access, then return to the app and click Reload Permissions (重新载入权限).
+1. **Wait for the initial index**: FSearch-gui needs to build an index on first launch. If the index is not ready, wait a moment and click Retry (重试).
+2. **Check access permissions**: Open Settings → Index (设置 → 索引). To search protected folders on internal storage, add and enable FSearch-gui in System Settings → Privacy & Security → Full Disk Access, then return to the app and click Reload Permissions (重新载入权限).
 3. **Add other drives**: Select an external or network drive, click Allow Access (允许访问), choose the drive's root folder, and click Update Index (更新索引). Disconnected drives are excluded from results; reconnecting a drive makes its existing index available again.
 
 ## Search and filtering
@@ -102,11 +102,11 @@ A global shortcut for bringing up the search window can be selected in Settings 
 | Appearance (外观) | Automatic language detection or English/Chinese selection; system, light, or dark appearance; accent color; row spacing; and sidebar visibility |
 | About (关于) | Current version, update checks, automatic checks and downloads, and links to this project and upstream |
 
-By default, FSearch displays the first 3,000 results and loads more as you scroll. Loading all results at once can use more than **1 GB of memory** and is not recommended.
+By default, FSearch-gui displays the first 3,000 results and loads more as you scroll. Loading all results at once can use more than **1 GB of memory** and is not recommended.
 
 Excluding a folder immediately hides its files from search results and skips it during subsequent scans. After removing an exclusion, update the index for the drive containing that folder.
 
-FSearch checks GitHub Releases for updates and downloads and verifies them in the app. Choose “Install and Restart” to use the new version, or download an installer through the link in About.
+FSearch-gui checks GitHub Releases for updates and downloads and verifies them in the app. Choose “Install and Restart” to use the new version, or download an installer through the link in About.
 
 ## Upstream project and acknowledgments
 

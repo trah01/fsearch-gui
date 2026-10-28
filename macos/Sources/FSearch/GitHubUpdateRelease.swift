@@ -74,7 +74,10 @@ struct GitHubUpdateRelease: Sendable {
         #else
         let architecture = "x86_64"
         #endif
-        let names = ["FSearch-\(version)-universal.zip", "FSearch-\(version)-\(architecture).zip"]
+        let names = [
+            "FSearch-gui-\(version)-universal.zip", "FSearch-gui-\(version)-\(architecture).zip",
+            "FSearch-\(version)-universal.zip", "FSearch-\(version)-\(architecture).zip"
+        ]
         guard let asset = names.compactMap({ name in release.assets.first { $0.name == name } }).first,
               let checksums = release.assets.first(where: {
                   $0.name == String(asset.name.dropLast(4)) + ".sha256"

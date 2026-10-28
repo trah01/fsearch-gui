@@ -1,4 +1,4 @@
-name: 构建并发布 macOS 应用
+name: 构建并发布 FSearch-gui macOS 应用
 
 on:
   push:
@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           cd build/release
-          shasum -a 256 -c "FSearch-$VERSION-universal.sha256"
+          shasum -a 256 -c "FSearch-gui-$VERSION-universal.sha256"
 
       - name: 发布 GitHub Release
         env:
@@ -98,12 +98,12 @@ jobs:
             fi
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$BUILD_COMMIT" \
-              --title "FSearch $VERSION" --generate-notes --draft
+              --title "FSearch-gui $VERSION" --generate-notes --draft
           fi
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
-            "build/release/FSearch-$VERSION-universal.zip" \
-            "build/release/FSearch-$VERSION-universal.dmg" \
-            "build/release/FSearch-$VERSION-universal.sha256"
+            "build/release/FSearch-gui-$VERSION-universal.zip" \
+            "build/release/FSearch-gui-$VERSION-universal.dmg" \
+            "build/release/FSearch-gui-$VERSION-universal.sha256"
           LATEST_TAG="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)"
           export LATEST_TAG
           PROMOTE="$(python3 - <<'PY'
