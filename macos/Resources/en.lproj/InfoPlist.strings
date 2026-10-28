@@ -1,0 +1,2 @@
+"NSRemovableVolumesUsageDescription" = "FSearch needs access to filenames on external drives to build a searchable index.";
+"NSNetworkVolumesUsageDescription" = "FSearch needs access to filenames on connected network drives so you can search their files.";

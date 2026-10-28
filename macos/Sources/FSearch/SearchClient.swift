@@ -20,14 +20,14 @@ actor SearchClient {
         if let path = request["in"] as? String {
             var isDirectory: ObjCBool = false
             guard path.hasPrefix("/"), FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
-                throw ClientError.message("请选择有效的文件夹，或粘贴完整的文件夹路径。")
+                throw ClientError.message(L("请选择有效的文件夹，或粘贴完整的文件夹路径。"))
             }
         }
         var baseRequest = request
         for field in ["type", "kind", "ext"] { baseRequest.removeValue(forKey: field) }
         baseRequest["format"] = "binary-v1"
         let result = try fetchRows(baseRequest)
-        guard let types = result.response.types else { throw ClientError.message("搜索服务返回了无法识别的数据。") }
+        guard let types = result.response.types else { throw ClientError.message(L("搜索服务返回了无法识别的数据。")) }
         self.catalog = SearchCatalog(key: catalogKey, entries: result.hits, types: types)
         catalogRevision += 1
         return try batch(request: request)
@@ -55,11 +55,11 @@ actor SearchClient {
         do {
             let header = try exchange(request)
             let response = try JSONDecoder().decode(DesktopSearchResponse.self, from: header)
-            guard response.ok else { throw ClientError.message(response.error ?? "搜索失败，请重试。") }
+            guard response.ok else { throw ClientError.message(response.error ?? L("搜索失败，请重试。")) }
             guard response.binary_version == 1, let length = response.binary_bytes, let count = response.count,
                   length >= 0, count >= 0, count <= length / 20,
                   maximumRows.map({ count <= $0 }) ?? true else {
-                throw ClientError.message("搜索服务返回了无法识别的数据。")
+                throw ClientError.message(L("搜索服务返回了无法识别的数据。"))
             }
             let hits = try SearchBinaryRows.decode(readPayload(length), count: count)
             return (hits, response, header)
@@ -113,7 +113,7 @@ actor SearchClient {
         let installed = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/fsearch")
         guard let executable = [bundled, local, installed].compactMap({ $0 }).first(where: {
             FileManager.default.isExecutableFile(atPath: $0.path)
-        }) else { throw ClientError.message("未找到搜索引擎，请先运行 scripts/build-app.sh 构建应用。") }
+        }) else { throw ClientError.message(L("未找到搜索引擎，请先运行 scripts/build-app.sh 构建应用。")) }
         return executable
     }
 
@@ -127,7 +127,7 @@ actor SearchClient {
         try task.run()
         task.waitUntilExit()
         guard task.terminationStatus == 0 else {
-            throw ClientError.message("无法重新载入权限，请退出应用后重新打开。")
+            throw ClientError.message(L("无法重新载入权限，请退出应用后重新打开。"))
         }
     }
 
@@ -144,7 +144,7 @@ actor SearchClient {
 
     func request(_ request: [String: Any]) throws -> [String: Any] {
         guard let response = try JSONSerialization.jsonObject(with: exchange(request)) as? [String: Any] else {
-            throw ClientError.message("搜索服务返回了无法识别的数据。")
+            throw ClientError.message(L("搜索服务返回了无法识别的数据。"))
         }
         return response
     }
@@ -180,9 +180,9 @@ actor SearchClient {
         while true {
             try Task.checkCancellation()
             guard ProcessInfo.processInfo.systemUptime < deadline else {
-                throw ClientError.message("搜索响应超时，请稍后重试。首次使用时，建立索引可能需要一些时间。")
+                throw ClientError.message(L("搜索响应超时，请稍后重试。首次使用时，建立索引可能需要一些时间。"))
             }
-            guard let output else { throw ClientError.message("搜索服务连接已断开，请点击重试。") }
+            guard let output else { throw ClientError.message(L("搜索服务连接已断开，请点击重试。")) }
             var descriptor = pollfd(fd: output.fileDescriptor, events: Int16(POLLIN), revents: 0)
             let ready = Darwin.poll(&descriptor, 1, 100)
             if ready < 0 {
@@ -195,7 +195,7 @@ actor SearchClient {
                 if errno == EINTR { continue }
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
-            guard count > 0 else { throw ClientError.message("搜索服务连接已断开，请点击重试。") }
+            guard count > 0 else { throw ClientError.message(L("搜索服务连接已断开，请点击重试。")) }
             return count
         }
     }

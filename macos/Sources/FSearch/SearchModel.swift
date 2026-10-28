@@ -53,7 +53,10 @@ final class SearchModel: ObservableObject {
     @Published private(set) var preparingSort = false
     @Published var error: String?
     @Published var searched = false
-    @Published var elapsed = ""
+    @Published private var elapsedMilliseconds: Double?
+    var elapsed: String {
+        elapsedMilliseconds.map { String(format: L("%.1f 毫秒"), $0) } ?? ""
+    }
     @Published private(set) var dataRevision = 0
     private(set) var displayGeneration = 0
     @Published private(set) var sort: ResultSort?
@@ -158,11 +161,11 @@ final class SearchModel: ObservableObject {
         advancedFilters.isActive || category != .all || timeFilter != .any || sizeFilter != .any || !scope.isEmpty
     }
     var timeFilterTitle: String {
-        advancedFilters.hasTime ? "过去 \(advancedFilters.modifiedDays) 天" : timeFilter.rawValue
+        advancedFilters.hasTime ? L("过去 \(String(describing: advancedFilters.modifiedDays)) 天") : timeFilter.rawValue.localized
     }
     var sizeFilterTitle: String {
         if advancedFilters.hasSize { return advancedFilters.sizeTitle }
-        return sizeFilter == .any ? "大小" : sizeFilter == .large ? ">100 MB" : "<1 MB"
+        return sizeFilter == .any ? L("大小") : sizeFilter == .large ? ">100 MB" : "<1 MB"
     }
     func hit(_ path: String) -> SearchHit? {
         guard let row = positions[path], hits.indices.contains(row) else { return nil }
@@ -244,7 +247,7 @@ final class SearchModel: ObservableObject {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        panel.prompt = "选择文件夹"
+        panel.prompt = L("选择文件夹")
         if panel.runModal() == .OK, let url = panel.url { scope = url.path }
     }
 
@@ -271,7 +274,7 @@ final class SearchModel: ObservableObject {
         scrollAfterOrdering = false
         selected = nil
         error = nil
-        elapsed = ""
+        elapsedMilliseconds = nil
         searched = false
         busy = true
         task = Task {
@@ -370,7 +373,7 @@ final class SearchModel: ObservableObject {
                 publish(snapshot)
                 prepareSorting(generation: current)
             }
-            elapsed = String(format: "%.1f 毫秒", (ProcessInfo.processInfo.systemUptime - started) * 1000)
+            elapsedMilliseconds = (ProcessInfo.processInfo.systemUptime - started) * 1000
             searched = true
         } catch {
             guard current == generation, !Task.isCancelled else { return }
@@ -455,7 +458,7 @@ final class SearchModel: ObservableObject {
     }
 
     func open(_ hit: SearchHit) {
-        if !NSWorkspace.shared.open(URL(fileURLWithPath: hit.path)) { error = "无法打开文件，请确认文件仍在原位置且有可用的打开方式。" }
+        if !NSWorkspace.shared.open(URL(fileURLWithPath: hit.path)) { error = L("无法打开文件，请确认文件仍在原位置且有可用的打开方式。") }
     }
     func reveal(_ hit: SearchHit) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: hit.path)]) }
     func copyPath(_ hit: SearchHit) {
@@ -468,7 +471,7 @@ final class SearchModel: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         guard pasteboard.writeObjects([hit.fileURL as NSURL]) else {
-            error = "无法复制文件，请重试。"
+            error = L("无法复制文件，请重试。")
             return false
         }
         return true
@@ -496,12 +499,12 @@ final class SearchModel: ObservableObject {
         let url = URL(fileURLWithPath: hit.path)
         let directory = hit.isDirectory ? url : url.deletingLastPathComponent()
         guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
-            error = "未找到终端应用。"
+            error = L("未找到终端应用。")
             return
         }
         NSWorkspace.shared.open([directory], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration()) { [weak self] _, error in
             if error != nil {
-                Task { @MainActor in self?.error = "无法在终端中打开此位置，请确认有访问权限。" }
+                Task { @MainActor in self?.error = L("无法在终端中打开此位置，请确认有访问权限。") }
             }
         }
     }

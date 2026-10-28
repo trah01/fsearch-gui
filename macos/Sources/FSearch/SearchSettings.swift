@@ -8,7 +8,7 @@ extension Notification.Name {
 enum ResultLoadingMode: String, CaseIterable, Identifiable {
     case onDemand = "on-demand", full = "full"
     var id: String { rawValue }
-    var title: String { self == .onDemand ? "滚动时继续加载" : "一次加载全部" }
+    var title: String { self == .onDemand ? L("滚动时继续加载") : L("一次加载全部") }
 }
 
 enum DefaultSearchSort: String, CaseIterable, Identifiable {
@@ -16,10 +16,10 @@ enum DefaultSearchSort: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .relevance: return "相关性"
-        case .name: return "文件名"
-        case .modified: return "最近修改"
-        case .size: return "文件从大到小"
+        case .relevance: return L("相关性")
+        case .name: return L("文件名")
+        case .modified: return L("最近修改")
+        case .size: return L("文件从大到小")
         }
     }
     var sort: ResultSort? {
@@ -67,8 +67,8 @@ final class SearchSettings: ObservableObject {
 
     func chooseDefaultFolder() {
         let panel = NSOpenPanel()
-        panel.title = "默认搜索位置"
-        panel.prompt = "选择"
+        panel.title = L("默认搜索位置")
+        panel.prompt = L("选择")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = false
@@ -77,42 +77,43 @@ final class SearchSettings: ObservableObject {
 }
 
 struct SearchSettingsView: View {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject private var settings = SearchSettings.shared
 
     var body: some View {
         SettingsPane {
             VStack(spacing: 12) {
-                SettingsRow("默认搜索位置") {
-                    Text(settings.defaultScope.isEmpty ? "这台 Mac" : (settings.defaultScope as NSString).lastPathComponent)
+                SettingsRow(L("默认搜索位置")) {
+                    Text(settings.defaultScope.isEmpty ? L("这台 Mac") : (settings.defaultScope as NSString).lastPathComponent)
                         .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary).help(settings.defaultScope)
-                    Menu("更改…") {
-                        Button("这台 Mac") { settings.defaultScope = "" }
-                        Button("选择文件夹…", action: settings.chooseDefaultFolder)
+                    Menu(L("更改…")) {
+                        Button(L("这台 Mac")) { settings.defaultScope = "" }
+                        Button(L("选择文件夹…"), action: settings.chooseDefaultFolder)
                     }.fixedSize()
                 }
-                SettingsRow("默认排序") {
-                    Picker("默认排序", selection: $settings.defaultSort) {
+                SettingsRow(L("默认排序")) {
+                    Picker(L("默认排序"), selection: $settings.defaultSort) {
                         ForEach(DefaultSearchSort.allCases) { Text($0.title).tag($0) }
                     }.labelsHidden().frame(width: 180)
                 }
-                SettingsRow("文件夹优先") {
-                    Toggle("文件夹优先", isOn: $settings.directoriesFirst).labelsHidden().toggleStyle(.switch)
+                SettingsRow(L("文件夹优先")) {
+                    Toggle(L("文件夹优先"), isOn: $settings.directoriesFirst).labelsHidden().toggleStyle(.switch)
                 }
             }
             Divider()
-            SettingsRow("记住上次筛选") {
-                Toggle("记住上次筛选", isOn: $settings.rememberFilters).labelsHidden().toggleStyle(.switch)
+            SettingsRow(L("记住上次筛选")) {
+                Toggle(L("记住上次筛选"), isOn: $settings.rememberFilters).labelsHidden().toggleStyle(.switch)
             }
             Divider()
             VStack(alignment: .leading, spacing: 10) {
-                SettingsRow("搜索结果加载") {
-                    Picker("搜索结果加载", selection: $settings.loadingMode) {
+                SettingsRow(L("搜索结果加载")) {
+                    Picker(L("搜索结果加载"), selection: $settings.loadingMode) {
                         ForEach(ResultLoadingMode.allCases) { Text($0.title).tag($0) }
                     }.labelsHidden().frame(width: 180)
                 }
                 SettingsNote(settings.loadingMode == .onDemand
-                    ? "先显示 3000 项，滚动时继续加载。筛选和排序对全部匹配结果生效。"
-                    : "一次显示全部匹配结果，内存占用可能超过 1 GB，不推荐开启。建议选择“滚动时继续加载”。")
+                    ? L("先显示 3000 项，滚动时继续加载。筛选和排序对全部匹配结果生效。")
+                    : L("一次显示全部匹配结果，内存占用可能超过 1 GB，不推荐开启。建议选择“滚动时继续加载”。"))
             }
         }
     }

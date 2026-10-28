@@ -17,10 +17,10 @@ struct StorageVolume: Identifiable {
     let error: String?
     var id: String { path }
     var status: String {
-        if building { return "正在重建索引…" }
-        if readable == false { return "无法读取" }
-        if included { return entries.map { "已建立索引 · \($0) 项" } ?? "已建立索引" }
-        return readable == true ? "未建立索引" : "未授权，未建立索引"
+        if building { return L("正在重建索引…") }
+        if readable == false { return L("无法读取") }
+        if included { return entries.map { L("已建立索引 · \(String(describing: $0)) 项") } ?? L("已建立索引") }
+        return readable == true ? L("未建立索引") : L("未授权，未建立索引")
     }
 }
 
@@ -74,7 +74,7 @@ final class StoragePermissions: ObservableObject {
     private func checked(_ request: [String: Any]) async throws -> [String: Any] {
         let response = try await client.request(request)
         guard response["ok"] as? Bool == true else {
-            throw ClientError.message(response["error"] as? String ?? "操作失败，请重试。")
+            throw ClientError.message(response["error"] as? String ?? L("操作失败，请重试。"))
         }
         return response
     }
@@ -131,17 +131,17 @@ final class StoragePermissions: ObservableObject {
     func requestVolumeAccess(_ volume: StorageVolume) {
         guard !busy else { return }
         let panel = NSOpenPanel()
-        panel.title = "允许访问磁盘“\(volume.name)”"
-        panel.message = "请选择此磁盘的根目录，以允许 FSearch 读取其中的文件。"
+        panel.title = L("允许访问磁盘“\(String(describing: volume.name))”")
+        panel.message = L("请选择此磁盘的根目录，以允许 FSearch 读取其中的文件。")
         panel.directoryURL = URL(fileURLWithPath: volume.path)
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "允许访问"
+        panel.prompt = L("允许访问")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard url.standardizedFileURL.path == volume.path else {
-            error = "请选择磁盘“\(volume.name)”的根目录。"
+            error = L("请选择磁盘“\(String(describing: volume.name))”的根目录。")
             return
         }
         do {
@@ -195,8 +195,8 @@ final class StoragePermissions: ObservableObject {
 
     func addExcludedFolders() {
         let panel = NSOpenPanel()
-        panel.title = "排除文件夹"
-        panel.prompt = "排除"
+        panel.title = L("排除文件夹")
+        panel.prompt = L("排除")
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = false
@@ -226,6 +226,7 @@ final class StoragePermissions: ObservableObject {
 }
 
 struct StorageSettingsView: View {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject var permissions: StoragePermissions
     @ObservedObject private var appearance = AppearanceSettings.shared
     @State private var selectedDisk = "/"
@@ -236,17 +237,17 @@ struct StorageSettingsView: View {
     var body: some View {
         SettingsPane {
             VStack(alignment: .leading, spacing: 10) {
-                SettingsRow("自动更新内置硬盘索引") {
-                    Toggle("自动更新内置硬盘索引", isOn: Binding(get: { permissions.automatic }, set: permissions.setAutomatic))
+                SettingsRow(L("自动更新内置硬盘索引")) {
+                    Toggle(L("自动更新内置硬盘索引"), isOn: Binding(get: { permissions.automatic }, set: permissions.setAutomatic))
                         .labelsHidden().toggleStyle(.switch)
                         .disabled(permissions.busy || !permissions.supportsSettings)
                 }
-                SettingsNote("内置硬盘随文件变化更新；外置磁盘和网络磁盘通过“更新索引”更新。")
+                SettingsNote(L("内置硬盘随文件变化更新；外置磁盘和网络磁盘通过“更新索引”更新。"))
                 if !permissions.supportsSettings && !permissions.busy && permissions.fullAccess != nil {
                     HStack {
-                        SettingsNote("当前搜索引擎需要重新载入，才能使用新的索引设置。")
+                        SettingsNote(L("当前搜索引擎需要重新载入，才能使用新的索引设置。"))
                         Spacer()
-                        Button("重新载入") { Task { await permissions.reload() } }
+                        Button(L("重新载入")) { Task { await permissions.reload() } }
                             .disabled(permissions.indexing)
                     }
                 }
@@ -276,14 +277,14 @@ struct StorageSettingsView: View {
     private var diskSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("磁盘").fontWeight(.medium)
+                Text(L("磁盘")).fontWeight(.medium)
                 Spacer()
                 if permissions.busy { ProgressView().controlSize(.small) }
-                Button("刷新") { Task { await permissions.refresh() } }.disabled(permissions.busy)
+                Button(L("刷新")) { Task { await permissions.refresh() } }.disabled(permissions.busy)
             }
             VStack(spacing: 0) {
-                diskRow("内置硬盘", path: "/", symbol: "internaldrive",
-                    status: permissions.internalBuilding ? "正在更新…" : permissions.internalUpdated == nil ? "尚未就绪" : permissions.automatic ? "实时更新" : "已暂停自动更新",
+                diskRow(L("内置硬盘"), path: "/", symbol: "internaldrive",
+                    status: permissions.internalBuilding ? L("正在更新…") : permissions.internalUpdated == nil ? L("尚未就绪") : permissions.automatic ? L("实时更新") : L("已暂停自动更新"),
                     entries: permissions.internalEntries, updated: permissions.internalUpdated ?? permissions.internalCompleted)
                 ForEach(permissions.volumes) { volume in
                     Divider()
@@ -298,10 +299,10 @@ struct StorageSettingsView: View {
                 }
                 Spacer()
                 if let volume = selectedVolume, volume.readable != true {
-                    Button("允许访问") { permissions.requestVolumeAccess(volume) }
+                    Button(L("允许访问")) { permissions.requestVolumeAccess(volume) }
                         .disabled(permissions.busy || volume.building)
                 }
-                Button("更新索引") { Task { await permissions.rebuild(selectedVolume) } }
+                Button(L("更新索引")) { Task { await permissions.rebuild(selectedVolume) } }
                     .disabled(permissions.busy || (selectedVolume.map { $0.building || $0.readable != true } ?? permissions.internalBuilding))
             }
             if let error = selectedVolume?.error ?? (selectedDisk == "/" ? permissions.internalError : nil) {
@@ -320,7 +321,7 @@ struct StorageSettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).lineLimit(1)
                     HStack(spacing: 10) {
-                        if let entries { Text("\(entries.formatted()) 项") }
+                        if let entries { Text(L("\(String(describing: entries.formatted())) 项")) }
                         if let updated { Text(updated.formatted(date: .numeric, time: .shortened)) }
                     }.font(.system(size: 11)).foregroundStyle(secondary)
                 }
@@ -341,16 +342,16 @@ struct StorageSettingsView: View {
     private var exclusionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("排除文件夹").fontWeight(.medium)
+                Text(L("排除文件夹")).fontWeight(.medium)
                 Spacer()
-                Button("移除") {
+                Button(L("移除")) {
                     if let selectedExclusion { permissions.removeExcludedFolder(selectedExclusion); self.selectedExclusion = nil }
                 }.disabled(selectedExclusion == nil || permissions.busy || !permissions.supportsSettings)
-                Button("添加…", action: permissions.addExcludedFolders)
+                Button(L("添加…"), action: permissions.addExcludedFolders)
                     .disabled(permissions.busy || !permissions.supportsSettings)
             }
             if permissions.excludedFolders.isEmpty {
-                SettingsNote("未排除任何文件夹")
+                SettingsNote(L("未排除任何文件夹"))
             } else {
                 VStack(spacing: 0) {
                     ForEach(permissions.excludedFolders, id: \.self) { path in
@@ -370,33 +371,33 @@ struct StorageSettingsView: View {
                     }
                 }
             }
-            SettingsNote("排除后立即从搜索结果隐藏，并停止扫描文件夹内的内容。移除排除项后，请更新所在磁盘的索引。")
+            SettingsNote(L("排除后立即从搜索结果隐藏，并停止扫描文件夹内的内容。移除排除项后，请更新所在磁盘的索引。"))
         }
     }
 
     private var permissionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SettingsRow("完全磁盘访问") {
-                Text(permissions.fullAccess == nil ? "正在检查…" : permissions.fullAccess == true ? "已允许" : "未允许")
+            SettingsRow(L("完全磁盘访问")) {
+                Text(permissions.fullAccess == nil ? L("正在检查…") : permissions.fullAccess == true ? L("已允许") : L("未允许"))
                     .foregroundStyle(.secondary)
                 if permissions.fullAccess == true && permissions.activeAccess {
-                    Menu("权限选项") {
-                        Button("检查权限") { Task { await permissions.refresh() } }
-                        Button("显示应用位置", action: permissions.showApplication)
-                        Button("重新载入权限") { Task { await permissions.reload() } }
+                    Menu(L("权限选项")) {
+                        Button(L("检查权限")) { Task { await permissions.refresh() } }
+                        Button(L("显示应用位置"), action: permissions.showApplication)
+                        Button(L("重新载入权限")) { Task { await permissions.reload() } }
                     }.fixedSize().disabled(permissions.busy || permissions.indexing)
                 } else {
-                    Button("打开系统设置", action: permissions.requestFullAccess)
+                    Button(L("打开系统设置"), action: permissions.requestFullAccess)
                 }
             }
             if permissions.fullAccess != true || !permissions.activeAccess {
                 HStack {
                     if permissions.fullAccess == true {
-                        SettingsNote("权限已更新，请重新载入。")
+                        SettingsNote(L("权限已更新，请重新载入。"))
                     }
                     Spacer()
-                    Button("显示应用位置", action: permissions.showApplication)
-                    Button("重新载入权限") { Task { await permissions.reload() } }
+                    Button(L("显示应用位置"), action: permissions.showApplication)
+                    Button(L("重新载入权限")) { Task { await permissions.reload() } }
                         .disabled(permissions.busy || permissions.indexing)
                 }
             }

@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         AppearanceSettings.shared.applyAppearance()
+        AppUpdater.shared.start()
         if let icon = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
             NSApp.applicationIconImage = NSImage(contentsOf: icon)
         }
@@ -41,23 +42,37 @@ struct SearchWindowRoot: View {
     @ObservedObject var model: SearchModel
     let delegate: AppDelegate
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("FSearch.showSidebar") private var showSidebar = true
+    @AppStorage("FSearch.showInspector") private var showInspector = true
 
     var body: some View {
+        let minimumWidth = SearchWindowLayout.minimumWidth(showSidebar: showSidebar, showInspector: showInspector)
         SearchView(model: model)
-            .frame(minWidth: 820, minHeight: 560)
-            .background(WindowRegistration { delegate.searchWindow = $0 })
+            .frame(minWidth: minimumWidth, minHeight: 560)
+            .background(WindowRegistration(minimumWidth: minimumWidth) { delegate.searchWindow = $0 })
             .onAppear { delegate.reopenSearch = { openWindow(id: "search") } }
     }
 }
 
 private struct WindowRegistration: NSViewRepresentable {
+    let minimumWidth: CGFloat
     let register: (NSWindow) -> Void
-    func makeNSView(context: Context) -> RegistrationView { RegistrationView(register: register) }
-    func updateNSView(_ view: RegistrationView, context: Context) {}
+    func makeNSView(context: Context) -> RegistrationView {
+        RegistrationView(minimumWidth: minimumWidth, register: register)
+    }
+    func updateNSView(_ view: RegistrationView, context: Context) {
+        guard view.minimumWidth != minimumWidth else { return }
+        view.minimumWidth = minimumWidth
+        view.scheduleResize()
+    }
 
     final class RegistrationView: NSView {
+        var minimumWidth: CGFloat
         let register: (NSWindow) -> Void
-        init(register: @escaping (NSWindow) -> Void) {
+        private var resizeScheduled = false
+
+        init(minimumWidth: CGFloat, register: @escaping (NSWindow) -> Void) {
+            self.minimumWidth = minimumWidth
             self.register = register
             super.init(frame: .zero)
         }
@@ -72,6 +87,27 @@ private struct WindowRegistration: NSViewRepresentable {
                 window.hasShadow = true
                 window.isMovableByWindowBackground = true
                 register(window)
+                scheduleResize()
+            }
+        }
+
+        func scheduleResize() {
+            guard !resizeScheduled else { return }
+            resizeScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.resizeScheduled = false
+                guard let window = self.window else { return }
+                window.contentMinSize = NSSize(width: self.minimumWidth, height: 560)
+                let width = window.contentRect(forFrameRect: window.frame).width
+                guard width < self.minimumWidth else { return }
+                var frame = window.frame
+                frame.size.width += self.minimumWidth - width
+                if let screen = window.screen {
+                    let visible = screen.visibleFrame
+                    frame.origin.x = max(visible.minX, min(frame.origin.x, visible.maxX - frame.width))
+                }
+                window.setFrame(frame, display: true, animate: false)
             }
         }
     }

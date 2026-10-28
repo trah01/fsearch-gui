@@ -15,6 +15,7 @@ private enum AdvancedTimeChoice: String, CaseIterable, Identifiable {
 }
 
 struct AdvancedSearchView: View {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject var model: SearchModel
     @ObservedObject private var appearance = AppearanceSettings.shared
     @Environment(\.dismiss) private var dismiss
@@ -42,62 +43,62 @@ struct AdvancedSearchView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("高级筛选").font(.system(size: 14, weight: .semibold))
+                Text(L("高级筛选")).font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Button("重置", action: reset)
+                Button(L("重置"), action: reset)
             }
             Divider()
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 14) {
                 GridRow {
-                    Text("文件名")
+                    Text(L("文件名"))
                     HStack(spacing: 8) {
-                        Picker("匹配方式", selection: $filters.nameMatch) {
-                            ForEach(FileNameMatch.allCases) { Text($0.rawValue).tag($0) }
-                        }.labelsHidden().frame(width: 112)
-                        TextField("文件名", text: $filters.name).textFieldStyle(.roundedBorder)
+                        Picker(L("匹配方式"), selection: $filters.nameMatch) {
+                            ForEach(FileNameMatch.allCases) { Text($0.rawValue.localized).tag($0) }
+                        }.labelsHidden().frame(width: Localization.languageCode == "en" ? 148 : 112)
+                        TextField(L("文件名"), text: $filters.name).textFieldStyle(.roundedBorder)
                     }
                 }
                 GridRow {
-                    Text("文件类型")
-                    Picker("文件类型", selection: $category) {
-                        ForEach(FileCategory.allCases) { Text($0.rawValue).tag($0) }
+                    Text(L("文件类型"))
+                    Picker(L("文件类型"), selection: $category) {
+                        ForEach(FileCategory.allCases) { Text($0.rawValue.localized).tag($0) }
                     }.labelsHidden()
                 }
                 if category == .custom {
                     GridRow {
-                        Text("文件后缀")
+                        Text(L("文件后缀"))
                         TextField("pdf, docx, xlsx", text: $extensions).textFieldStyle(.roundedBorder)
                     }
                 }
                 GridRow {
-                    Text("文件大小")
+                    Text(L("文件大小"))
                     HStack(spacing: 8) {
-                        TextField("最小", text: $filters.minimumSize).textFieldStyle(.roundedBorder)
-                        Text("至").foregroundStyle(.secondary)
-                        TextField("最大", text: $filters.maximumSize).textFieldStyle(.roundedBorder)
-                        Picker("大小单位", selection: $filters.sizeUnit) {
-                            ForEach(FileSizeUnit.allCases) { Text($0.rawValue).tag($0) }
+                        TextField(L("最小"), text: $filters.minimumSize).textFieldStyle(.roundedBorder)
+                        Text(L("至")).foregroundStyle(.secondary)
+                        TextField(L("最大"), text: $filters.maximumSize).textFieldStyle(.roundedBorder)
+                        Picker(L("大小单位"), selection: $filters.sizeUnit) {
+                            ForEach(FileSizeUnit.allCases) { Text($0.rawValue.localized).tag($0) }
                         }.labelsHidden().frame(width: 70)
                     }
                 }
                 GridRow {
-                    Text("修改时间")
+                    Text(L("修改时间"))
                     HStack(spacing: 8) {
-                        Picker("修改时间", selection: $time) {
-                            ForEach(AdvancedTimeChoice.allCases) { Text($0.rawValue).tag($0) }
+                        Picker(L("修改时间"), selection: $time) {
+                            ForEach(AdvancedTimeChoice.allCases) { Text($0.rawValue.localized).tag($0) }
                         }.labelsHidden()
                         if time == .custom {
-                            Text("过去")
-                            TextField("天数", text: $filters.modifiedDays).textFieldStyle(.roundedBorder).frame(width: 60)
-                            Text("天")
+                            Text(L("过去"))
+                            TextField(L("天数"), text: $filters.modifiedDays).textFieldStyle(.roundedBorder).frame(width: 60)
+                            Text(L("天"))
                         }
                     }
                 }
                 GridRow {
-                    Text("搜索位置")
+                    Text(L("搜索位置"))
                     HStack(spacing: 8) {
-                        TextField("这台 Mac", text: $scope).textFieldStyle(.roundedBorder)
-                        Button("选择…", action: chooseFolder)
+                        TextField(L("这台 Mac"), text: $scope).textFieldStyle(.roundedBorder)
+                        Button(L("选择…"), action: chooseFolder)
                     }
                 }
             }
@@ -105,12 +106,12 @@ struct AdvancedSearchView: View {
             Divider()
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("应用", action: apply).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                Button(L("取消")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L("Apply"), action: apply).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }
         }
         .font(.system(size: 13))
-        .padding(20).frame(width: 520)
+        .padding(20).frame(width: Localization.languageCode == "en" ? 580 : 520)
         .background(AppAppearance.background)
         .foregroundStyle(AppAppearance.text)
         .tint(AppAppearance.accent)
@@ -127,8 +128,8 @@ struct AdvancedSearchView: View {
 
     private func chooseFolder() {
         let panel = NSOpenPanel()
-        panel.title = "选择搜索位置"
-        panel.prompt = "选择"
+        panel.title = L("选择搜索位置")
+        panel.prompt = L("选择")
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = false
@@ -143,13 +144,13 @@ struct AdvancedSearchView: View {
             _ = try filters.requestFields()
             let extensions = category == .custom ? try AdvancedSearchFilters.normalizedExtensions(extensions) : ""
             if category == .folder && filters.hasSize {
-                throw ClientError.message("文件夹不支持文件大小筛选，请调整条件。")
+                throw ClientError.message(L("文件夹不支持文件大小筛选，请调整条件。"))
             }
             let scope = (scope.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
             if !scope.isEmpty {
                 var directory: ObjCBool = false
                 guard scope.hasPrefix("/"), FileManager.default.fileExists(atPath: scope, isDirectory: &directory), directory.boolValue else {
-                    throw ClientError.message("请选择有效的文件夹，或输入完整的文件夹路径。")
+                    throw ClientError.message(L("请选择有效的文件夹，或输入完整的文件夹路径。"))
                 }
             }
             model.applyAdvancedFilters(filters, category: category, extensions: extensions, time: time.filter, scope: scope)

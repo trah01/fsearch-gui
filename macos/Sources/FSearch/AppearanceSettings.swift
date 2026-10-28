@@ -73,19 +73,22 @@ final class AppearanceSettings: ObservableObject {
 }
 
 struct AppSettingsView: View {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject var permissions: StoragePermissions
     @ObservedObject private var appearance = AppearanceSettings.shared
 
     var body: some View {
         TabView {
             GeneralSettingsView()
-                .tabItem { Label("通用", systemImage: "gearshape") }
+                .tabItem { Label(L("通用"), systemImage: "gearshape") }
             SearchSettingsView()
-                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+                .tabItem { Label(L("搜索"), systemImage: "magnifyingglass") }
             StorageSettingsView(permissions: permissions)
-                .tabItem { Label("索引", systemImage: "externaldrive") }
+                .tabItem { Label(L("索引"), systemImage: "externaldrive") }
             AppearanceSettingsView()
-                .tabItem { Label("外观", systemImage: "paintpalette") }
+                .tabItem { Label(L("外观"), systemImage: "paintpalette") }
+            AboutSettingsView()
+                .tabItem { Label(L("关于"), systemImage: "info.circle") }
         }
         .padding(.top, 8)
         .frame(width: 700, height: 560)
@@ -97,18 +100,26 @@ struct AppSettingsView: View {
 
 private struct AppearanceSettingsView: View {
     @ObservedObject private var appearance = AppearanceSettings.shared
+    @ObservedObject private var language = LanguageSettings.shared
     @AppStorage("FSearch.showSidebar") private var showSidebar = true
     @AppStorage("FSearch.showInspector") private var showInspector = true
 
     var body: some View {
         SettingsPane {
+            SettingsRow(L("语言")) {
+                Picker(L("语言"), selection: $language.selection) {
+                    ForEach(AppLanguage.allCases) { Text($0.title).tag($0) }
+                }.labelsHidden().frame(width: 220)
+            }
+            SettingsNote(L("部分系统窗口将在重新启动后使用新语言。"))
+            Divider()
             VStack(spacing: 12) {
-                SettingsRow("外观") {
-                    Picker("外观", selection: $appearance.mode) {
-                        ForEach(AppearanceMode.allCases) { Text($0.rawValue).tag($0) }
+                SettingsRow(L("外观")) {
+                    Picker(L("外观"), selection: $appearance.mode) {
+                        ForEach(AppearanceMode.allCases) { Text($0.rawValue.localized).tag($0) }
                     }.labelsHidden().pickerStyle(.segmented).frame(width: 280)
                 }
-                SettingsRow("强调色") {
+                SettingsRow(L("强调色")) {
                     HStack(spacing: 8) {
                         ForEach(ThemeColor.allCases) { themeSwatch($0) }
                     }
@@ -116,22 +127,22 @@ private struct AppearanceSettingsView: View {
             }
             Divider()
             VStack(spacing: 12) {
-                SettingsRow("列表行距") {
-                    Picker("列表行距", selection: $appearance.compactRows) {
-                        Text("标准").tag(false)
-                        Text("紧凑").tag(true)
+                SettingsRow(L("列表行距")) {
+                    Picker(L("列表行距"), selection: $appearance.compactRows) {
+                        Text(L("标准")).tag(false)
+                        Text(L("紧凑")).tag(true)
                     }.labelsHidden().pickerStyle(.segmented).frame(width: 180)
                 }
-                SettingsRow("显示左侧栏") {
-                    Toggle("显示左侧栏", isOn: $showSidebar).labelsHidden().toggleStyle(.switch)
+                SettingsRow(L("显示左侧栏")) {
+                    Toggle(L("显示左侧栏"), isOn: $showSidebar).labelsHidden().toggleStyle(.switch)
                 }
-                SettingsRow("显示文件详情") {
-                    Toggle("显示文件详情", isOn: $showInspector).labelsHidden().toggleStyle(.switch)
+                SettingsRow(L("显示文件详情")) {
+                    Toggle(L("显示文件详情"), isOn: $showInspector).labelsHidden().toggleStyle(.switch)
                 }
             }
             HStack {
                 Spacer()
-                Button("恢复外观默认设置") { appearance.reset(); showSidebar = true; showInspector = true }
+                Button(L("恢复外观默认设置")) { appearance.reset(); showSidebar = true; showInspector = true }
             }
         }
     }
@@ -149,9 +160,9 @@ private struct AppearanceSettingsView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(theme.rawValue)
-        .accessibilityLabel(theme.rawValue)
-        .accessibilityValue(selected ? "已选择" : "未选择")
+        .help(theme.rawValue.localized)
+        .accessibilityLabel(theme.rawValue.localized)
+        .accessibilityValue(selected ? L("已选择") : L("未选择"))
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }

@@ -1,145 +1,117 @@
-# FSearch
+# FSearch for macOS
 
-Whole-disk file search for macOS: names in about 0.1 ms, typo-tolerant,
-plus indexed search inside files. A CLI with a small daemon, a Rust crate,
-or an MCP server for coding agents.
+[简体中文](README.md) | [English](README.en.md)
 
-## macOS 图形界面
+一个基于 [noahdunnagan/fsearch](https://github.com/noahdunnagan/fsearch) 开发的 macOS 文件搜索应用。通过类似访达的三栏界面，快速查找文件和文件夹，按类型、大小、修改时间和位置缩小范围，并直接预览、打开、复制或拖出搜索结果。
 
-需要 macOS 13 或更新版本、Rust 和 Xcode Command Line Tools。在项目目录运行：
+## 界面预览
+
+### 浅色模式
+
+![FSearch 浅色模式：左侧分类与位置、中间搜索结果、右侧文件详情](docs/screenshots/main-window-light.png)
+
+### 深色模式
+
+![FSearch 深色模式：搜索、高级筛选与文件详情](docs/screenshots/main-window-dark.png)
+
+## 主要功能
+
+- **即时搜索**：输入文件名即可搜索，支持模糊匹配和拼写容错；不输入关键词时，也可以浏览已索引的文件。
+- **分类与位置**：左侧栏提供文档、图片、视频、音频、应用和文件夹等分类，可搜索这台 Mac、指定文件夹或已建立索引的挂载磁盘。
+- **高级筛选**：搜索框末尾的“高级筛选”可设置文件名匹配方式、类型、自定义后缀、大小区间、修改时间和搜索位置，点击“应用”后生效。
+- **结果浏览**：支持列表、网格视图，以及按相关性、文件名、大小和修改时间排序；可开启目录优先。筛选和排序对全部匹配结果生效。
+- **文件操作**：双击打开，按空格快速查看；选中文件后可复制到其他应用中粘贴，或直接拖到其他应用。右侧详情中还可查看文件信息、复制路径、在访达中显示或在终端中打开所在目录。
+- **磁盘索引**：内置硬盘可随文件变化自动更新；外置磁盘和网络磁盘支持单独授权和手动更新索引，也可排除不需要搜索的文件夹。
+- **外观与快捷操作**：支持跟随系统、浅色和深色模式，多种主题强调色，标准或紧凑行距，以及全局搜索快捷键和登录启动。
+- **中英文界面**：自动识别系统语言，也可在“设置 → 外观 → 语言”中手动选择简体中文或 English。
+- **应用内更新**：在“关于”页面检查新版本，支持自动检查和后台下载，安装并重新启动后即可使用新版。
+
+左右侧栏均可通过顶栏按钮展开或关闭；展开时窗口空间不足会自动拉宽。
+
+## 安装与首次使用
+
+需要 **macOS 13 或更新版本**，发行安装包同时支持 Apple Silicon 和 Intel Mac。
+
+前往 [GitHub Releases](https://github.com/trah01/fsearch-gui/releases) 下载 DMG，打开后将 FSearch 拖入“应用程序”文件夹。安装后可在“设置 → 关于”中检查更新，也可从应用菜单选择“检查更新…”。
+
+### 从源码构建
+
+需要 Rust 和 Xcode Command Line Tools。版本由根目录的 [VERSION](VERSION) 文件提供。
+
+在本项目目录中运行：
 
 ```sh
 bash scripts/build-app.sh
 open build/FSearch.app
 ```
 
-窗口支持限定文件夹范围、即时搜索及格式分类。位置栏可直接输入或粘贴文件夹路径（支持 `~`），也可点击“选择…”选择文件夹；清空后搜索所有位置。
-选择“自定义后缀”后输入 `pdf, docx, xlsx`，可同时筛选多个后缀，也支持 `.pdf` 写法。
-“可执行文件”按常见后缀筛选应用和脚本（如 app、exe、sh、command），不按 Unix 执行权限筛选无后缀文件。
+生成的应用位于 `build/FSearch.app`，可以将其复制到“应用程序”文件夹后使用。
 
-双击文件打开，右键可在访达中显示或复制路径。
-默认使用按需模式，每批最多加载 3000 项，滚动接近底部时继续加载；可在“设置 → 搜索 → 加载模式”切换为一次加载全部匹配项的全量模式。排序和目录优先对全部匹配结果生效。未输入搜索词时按索引顺序浏览文件。“更多操作 → 刷新结果”读取索引中的最新记录。列表使用原生表格按可见行绘制，仅对可见行计算显示文字。选中文件后按空格快速查看，`⌘F` 聚焦搜索框，`⌘O` 选择文件夹，`⌘,` 打开设置。
-首次使用需要建立索引，若提示索引尚未就绪，稍后点击“重试”。
-设置窗口分为“通用、搜索、索引、外观”：可配置全局搜索快捷键、登录启动、关闭窗口后的行为、默认搜索位置和排序、记住上次筛选，以及标准或紧凑行距。
-“索引”中可暂停或恢复内置硬盘的自动更新，并添加排除文件夹。排除后立即从搜索结果隐藏，后续扫描跳过其中的内容；移除排除项后，需要更新所在磁盘的索引。外置磁盘和网络磁盘仍通过“更新索引”手动更新。索引设置保存在数据目录的 `index-settings.json`，默认开启自动更新且不排除文件夹。
-界面与命令行共用索引。“设置 → 索引”（`⌘,`）可检查完全磁盘访问权限以及各磁盘的读取和索引状态。
-内置硬盘的受保护文件夹需要在系统设置的“隐私与安全性 → 完全磁盘访问权限”中添加并启用 FSearch，然后点击“重新载入权限”。选择“内置硬盘”后点击“更新索引”可重新扫描内置存储，保留其他磁盘的索引。
-选择外置磁盘后，通过“允许访问”选择并授权根目录，再点击“更新索引”。索引按磁盘单独保存，重建完成后参与搜索，后续通过该按钮更新。磁盘断开时不返回其结果，重新连接原磁盘后恢复使用已保存的索引。
-搜索控件位于标题栏下方，使用不透明背景。关闭搜索窗口后，点击 Dock 图标可重新打开。
+### 首次使用
 
-```
-cargo build --release && ./target/release/fsearch install   # -> ~/.local/bin/fsearch
-fsearch fsearch main              # find files by name
-fsearch 'ext:rs grep:apply_dir'   # search inside files
-```
+1. **等待首次索引完成**：首次启动需要建立索引；如果提示索引尚未就绪，稍后点击“重试”。
+2. **检查访问权限**：打开“设置 → 索引”。如需搜索内置硬盘中的受保护文件夹，在系统设置的“隐私与安全性 → 完全磁盘访问权限”中添加并启用 FSearch，再回到应用点击“重新载入权限”。
+3. **添加其他磁盘**：选中外置磁盘或网络磁盘，点击“允许访问”并选择该磁盘的根目录，再点击“更新索引”。磁盘断开后不会返回其搜索结果，重新连接后可继续使用已有索引。
 
-Or skip the Rust toolchain with a release build for Apple Silicon:
+## 搜索与筛选
 
-```
-curl -L https://github.com/noahdunnagan/fsearch/releases/latest/download/fsearch-aarch64-apple-darwin.tar.gz | tar xz && ./fsearch install
-```
+直接输入文件名即可开始搜索。工具栏下方可快速调整搜索位置、修改时间、大小、文件类型和排序；需要组合更多条件时，使用搜索框右端的“高级筛选”。
 
-## Speed
+选择“自定义后缀”后，可输入 `pdf, docx, xlsx` 同时搜索多种格式，也支持 `.pdf` 写法。搜索位置可选择文件夹，或输入、粘贴完整路径，支持 `~` 表示个人文件夹。
 
-M4 Mac mini, a home holding the Linux or the Chromium source tree, vs the
-previous version (b88f4e9). Medians; Linux / Chromium.
+也可以在搜索框中使用以下语法：
 
-| | before | now |
-|---|---:|---:|
-| right file first, name search | 83% / 86% | 93% / 97% |
-| right file first, two typos | 11% / 15% | 74% / 93% |
-| find a file by name | 0.045 / 0.10 ms | 0.054 / 0.12 ms |
-| an edited file greppable | 2.1 s | 1.3 ms |
-| a rename or delete visible | 45 / 47 ms | 18 / 15 ms |
-| first run, a name in a folder | 7.8 / 7.8 s | 0.18 / 1.2 s |
-| first run, every match in the tree | 10.9 / 12.2 s | 2.4 / 10.8 s |
-| files grep can search (rg's own set) | 96% / 92% | 99.9% / 99.8% |
-| grep, first page | 0.29 / 0.48 ms | 0.33 / 0.65 ms |
-| index on disk | 503 / 893 MB | 309 / 600 MB |
-| peak memory while indexing | 1.13 / 1.37 GB | 0.77 / 0.94 GB |
-| daemon memory | 19 / 100 MB | 21 / 35 MB |
+| 输入示例 | 用途 |
+| --- | --- |
+| `report 2026` | 组合多个关键词查找文件 |
+| `report !draft` | 查找 report，并排除 draft |
+| `'report` | 按原样匹配 report，不对该词进行模糊匹配 |
+| `^report` | 匹配以 report 开头的文件名 |
+| `.pdf$` | 匹配以 .pdf 结尾的文件名 |
+| `ext:pdf,docx` | 按文件后缀筛选 |
+| `size:>100MB` | 查找大于 100 MB 的文件 |
+| `mtime:<7d` | 查找最近 7 天修改的文件 |
+| `report in:~/Documents` | 在个人“文稿”文件夹内查找 report |
 
-The index is a third smaller while holding a third more text: one 3-bit
-filter per file instead of two, compressed posting lists and paths, and
-bit-packed name arrays read in place. Grep's first page reads a few more
-files for it, and the deeper typo search costs a little on names.
+图形界面主要用于文件名搜索。原项目还提供命令行、文件内容搜索和 MCP 等能力，相关用法请参阅[原项目文档](https://github.com/noahdunnagan/fsearch#readme)。
 
-## Queries
+## 常用快捷键
 
-```
-fsearch 'readme in:~/Developer'          # inside a folder
-fsearch 'type:image size:>5mb mtime:<7d'
-fsearch 'ext:rs regex:fn\s+\w+_dir'      # regex inside files
-fsearch 'sym:apply_dir'                  # where it's defined
-fsearch 'src/**/*.{c,h} !test/ init'     # globs, in or out
-fsearch 'git:modified in:~/Developer/app'
-```
+| 快捷键 | 操作 |
+| --- | --- |
+| `⌘F` | 聚焦搜索框 |
+| `⌘O` | 选择搜索文件夹 |
+| `⌘,` | 打开设置 |
+| `⌘C` | 复制选中的文件 |
+| `空格` | 快速查看选中的文件 |
+| `Return` | 打开选中的文件 |
+| `⌃⌘S` | 展开或关闭左侧栏 |
+| `⌃⌘I` | 展开或关闭文件详情 |
 
-Words are fuzzy and forgive a typo at any letter, two in words of 8+
-(`mian.rs` finds `main.rs`); several words can spell one name. Accented
-names match however they were stored. Also `'exact`, `^prefix`, `suffix$`
-and `!exclude`. Filters: `ext:` `type:` `kind:` `in:` `size:` `mtime:`
-`re:` `path:` `grep:` `regex:` `sym:` `limit:` and `git:` (`modified`
-`staged` `untracked` `clean` `tracked` `ignored` `conflict`). Content search is
-smart-case, and regexes match within a line, as in ripgrep.
+全局唤起搜索窗口的快捷键可在“设置 → 通用”中选择，默认关闭。
 
-## What grep covers
+## 设置
 
-Text files up to 1 MB, and up to 10 MB inside git repos, minus what git
-ignores. It leaves out lockfiles, JSON of 100 KB and up, minified or
-bundled assets, linked git worktrees (their main checkout is indexed), and
-build-output folders outside repos. To leave out more, list folders in
-`~/Library/Application Support/FSearch/content-skip.txt`, one per line
-(`~` and `#` comments work). Names are always indexed, and a grep inside
-a file you name still reads it.
+| 页面 | 可调整的内容 |
+| --- | --- |
+| 通用 | 全局搜索快捷键、登录启动、关闭窗口后保持后台运行或退出应用 |
+| 搜索 | 默认搜索位置、默认排序、文件夹优先、记住上次筛选、结果加载方式 |
+| 索引 | 磁盘访问权限与索引状态、更新索引、内置硬盘自动更新、排除文件夹 |
+| 外观 | 语言自动识别与中英文切换，浅色、深色模式，主题强调色、列表行距、左右侧栏显示 |
+| 关于 | 当前版本、检查更新、自动检查和下载更新、GitHub 项目与原项目链接 |
 
-## Full Disk Access
+默认先显示 3000 项结果，滚动时继续加载。一次加载全部结果可能占用超过 **1 GB 内存**，不推荐开启。
 
-From a terminal with Full Disk Access it indexes everything. As a login
-item (`fsearch install --login`), grant `~/.local/bin/fsearch` access in
-System Settings > Privacy & Security, again after each rebuild. Without
-access it skips protected folders instead of prompting.
+排除文件夹后，其中的文件会立即从搜索结果隐藏，后续扫描也会跳过这些文件夹；移除排除项后，需要更新所在磁盘的索引。
 
-## API
+应用从 GitHub Releases 检查更新，可在应用内下载并校验，选择“安装并重新启动”后使用新版本。也可通过“关于”中的链接下载安装包。
 
-JSON lines over `~/Library/Application Support/FSearch/fsearch.sock`, or
-`fsearch stdio`:
+## 原项目与致谢
 
-```json
-{"q": "fsearch main", "limit": 20, "offset": 20}
-{"op": "grep", "pattern": "apply_dir", "in": "~/Developer", "context": 2}
-{"q": "main.rs", "boost": true, "near": "~/Developer/app/src/lib.rs", "git": true}
-{"op": "open", "path": "~/Developer/app/src/main.rs"}
-{"op": "recent", "in": "~/Developer/app"}
-```
+本项目基于 **[Noah Dunnagan](https://github.com/noahdunnagan)** 开发的 **[fsearch](https://github.com/noahdunnagan/fsearch)**，在其搜索引擎和命令行工具的基础上增加 macOS 图形界面与相关功能。感谢原作者及贡献者提供的开源工作。
 
-`open` tells it what you opened; `"boost": true` ranks those higher for a
-while, `near` favors files close to the one you're in, and `recent` lists
-what you worked on lately. `"git": true` adds each hit's git status.
+本仓库是独立维护的衍生项目，并非原作者发布或维护的官方图形客户端。
 
-For coding agents, `fsearch mcp` is an MCP server on stdio with
-`find_files`, `grep` and `multi_grep`.
+## 许可证
 
-Or link the crate:
-
-```rust
-let engine = fsearch::Engine::start(fsearch::Options { dir: fsearch::default_dir(&home), home: home.clone(), skip: None })?;
-let hits = engine.search(&fsearch::Query::parse("fsearch main", &home)?)?;
-```
-
-An app and the CLI share one index: the first process owns it, the rest
-follow.
-
-## How it works
-
-- Crawls the disk once with `getattrlistbulk`, then follows FSEvents:
-  changes show up in about 15 ms, and a restart replays only what changed.
-  On a first run, a search in a folder indexes that folder first.
-- Names live in one mmap'd file, folder by folder, so `in:` is a range. A
-  bitmap of each name's letters rules out most names before scoring.
-- Content search is a trigram index plus a per-file filter, so a search
-  only reads files likely to match. Identical files are indexed once, and
-  deleted files' entries are compacted away. Matches are read fresh from
-  disk; files edited since the last index sync are read directly.
-- The daemon runs with malloc's space-efficient mode, so it gives memory
-  back when idle.
+采用 [MIT 许可证](LICENSE)，保留原项目的版权声明和许可条款。

@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 
 struct SearchResultsGrid: View {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject var model: SearchModel
     @ObservedObject private var appearance = AppearanceSettings.shared
     @FocusState private var focused: Bool
@@ -24,18 +25,18 @@ struct SearchResultsGrid: View {
                                     return NSItemProvider(object: hit.fileURL as NSURL)
                                 }
                                 .contextMenu {
-                                    Button("打开") { model.open(hit) }
-                                    Button("快速查看") { preview(hit) }
-                                    Button("在访达中显示") { model.reveal(hit) }
-                                    Button("复制文件") { model.copyFile(hit) }
-                                    Button("复制路径") { model.copyPath(hit) }
-                                    Button("在终端中打开") { model.openTerminal(hit) }
+                                    Button(L("打开")) { model.open(hit) }
+                                    Button(L("快速查看")) { preview(hit) }
+                                    Button(L("在访达中显示")) { model.reveal(hit) }
+                                    Button(L("复制文件")) { model.copyFile(hit) }
+                                    Button(L("复制路径")) { model.copyPath(hit) }
+                                    Button(L("在终端中打开")) { model.openTerminal(hit) }
                                 }
                                 .accessibilityElement(children: .ignore)
                                 .accessibilityLabel("\(hit.name)，\(hit.kindText)，\(hit.sizeText)")
                                 .accessibilityAddTraits(model.selected == hit.path ? [.isButton, .isSelected] : .isButton)
                                 .accessibilityAction { model.selected = hit.path }
-                                .accessibilityAction(named: Text("打开")) { model.open(hit) }
+                                .accessibilityAction(named: Text(L("打开"))) { model.open(hit) }
                         }
                     }.padding(4).padding(.trailing, 16)
                 }
@@ -65,6 +66,7 @@ struct SearchResultsGrid: View {
 private enum GridAnchor: Hashable { case top }
 
 private struct FileGridItem: View {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject private var appearance = AppearanceSettings.shared
     let hit: SearchHit
     let selected: Bool

@@ -33,10 +33,10 @@ struct SearchHit: Identifiable, Sendable, Decodable {
     var createdText: String { "—" }
     var id: String { path }
     var kindText: String {
-        if (path as NSString).pathExtension.lowercased() == "app" { return "应用程序" }
-        if isDirectory { return "文件夹" }
+        if (path as NSString).pathExtension.lowercased() == "app" { return L("应用程序") }
+        if isDirectory { return L("文件夹") }
         let ext = (path as NSString).pathExtension.uppercased()
-        return ext.isEmpty ? "文件" : "\(ext) 文件"
+        return ext.isEmpty ? L("文件") : L("\(String(describing: ext)) 文件")
     }
 
     init(path: String, kind: UInt8, size: Int64, modified: Date, typeMask: UInt8) {

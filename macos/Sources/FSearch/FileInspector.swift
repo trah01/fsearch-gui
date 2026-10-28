@@ -13,6 +13,7 @@ private struct FileMetadata: Sendable {
 }
 
 struct FileInspector: View {
+    @ObservedObject private var language = LanguageSettings.shared
     let hit: SearchHit?
     @ObservedObject var model: SearchModel
     @ObservedObject private var appearance = AppearanceSettings.shared
@@ -29,34 +30,36 @@ struct FileInspector: View {
                     VStack(alignment: .leading, spacing: compact ? 14 : 20) {
                         summary(hit, compact: compact)
                         VStack(alignment: .leading, spacing: 0) {
-                            Text("信息").font(.system(size: 13, weight: .semibold)).padding(.bottom, 8)
-                            infoRow("种类", details.kind)
-                            infoRow("大小", details.size ?? hit.sizeText)
-                            infoRow("位置", (hit.path as NSString).deletingLastPathComponent)
-                            infoRow("创建时间", details.created ?? hit.createdText)
-                            infoRow("修改时间", details.modified ?? hit.modifiedText)
-                            infoRow("上次访问", details.accessed ?? "—")
-                            if !details.tags.isEmpty { infoRow("标签", details.tags.joined(separator: "、")) }
+                            Text(L("信息")).font(.system(size: 13, weight: .semibold)).padding(.bottom, 8)
+                            infoRow(L("种类"), details.kind)
+                            infoRow(L("大小"), details.size ?? hit.sizeText)
+                            infoRow(L("位置"), (hit.path as NSString).deletingLastPathComponent)
+                            infoRow(L("创建时间"), details.created ?? hit.createdText)
+                            infoRow(L("修改时间"), details.modified ?? hit.modifiedText)
+                            infoRow(L("上次访问"), details.accessed ?? "—")
+                            if !details.tags.isEmpty {
+                                infoRow(L("标签"), details.tags.joined(separator: Localization.languageCode == "en" ? ", " : "、"))
+                            }
                         }
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("路径").font(.system(size: 14, weight: .semibold))
+                            Text(L("路径")).font(.system(size: 14, weight: .semibold))
                             HStack(spacing: 8) {
                                 Image(systemName: hit.isDirectory ? "folder" : "doc").foregroundStyle(.secondary)
                                 Text(hit.path).font(.system(size: 11)).lineLimit(3).truncationMode(.middle)
                                     .textSelection(.enabled).help(hit.path)
                                 Spacer(minLength: 0)
                                 Button { copy(hit) } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }
-                                    .buttonStyle(.plain).accessibilityLabel(copied ? "已复制路径" : "复制路径")
+                                    .buttonStyle(.plain).accessibilityLabel(copied ? L("已复制路径") : L("复制路径"))
                             }
                             .padding(10).floatingSurface(radius: 12)
                         }
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("更多操作").font(.system(size: 14, weight: .semibold))
+                            Text(L("更多操作")).font(.system(size: 14, weight: .semibold))
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                                action("在访达中显示", symbol: "folder") { model.reveal(hit) }
-                                action(copied ? "已复制路径" : "复制路径", symbol: copied ? "checkmark" : "doc.on.doc") { copy(hit) }
-                                action("快速查看", symbol: "eye") { preview(hit) }
-                                action("在终端中打开", symbol: "terminal") { model.openTerminal(hit) }
+                                action(L("在访达中显示"), symbol: "folder") { model.reveal(hit) }
+                                action(copied ? L("已复制路径") : L("复制路径"), symbol: copied ? "checkmark" : "doc.on.doc") { copy(hit) }
+                                action(L("快速查看"), symbol: "eye") { preview(hit) }
+                                action(L("在终端中打开"), symbol: "terminal") { model.openTerminal(hit) }
                             }
                         }
                         if let error = details.error {
@@ -68,13 +71,13 @@ struct FileInspector: View {
             } else {
                 VStack(spacing: 14) {
                     Image(systemName: "doc.text.magnifyingglass").font(.system(size: 40, weight: .ultraLight))
-                    Text("选择文件查看详情").font(.system(size: 13))
+                    Text(L("选择文件查看详情")).font(.system(size: 13))
                 }
                 .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(Color.clear)
-        .task(id: hit.map { "\($0.path):\($0.modified.timeIntervalSince1970)" }) {
+        .task(id: hit.map { "\($0.path):\($0.modified.timeIntervalSince1970):\(Localization.languageCode)" }) {
             copied = false
             copiedFile = false
             await details.load(hit)
@@ -95,26 +98,26 @@ struct FileInspector: View {
                 .font(.system(size: 12)).foregroundStyle(AppAppearance.muted).multilineTextAlignment(.center)
             HStack(spacing: 8) {
                 Button { model.open(hit) } label: {
-                    Label("打开", systemImage: "arrow.up.forward.square").font(.system(size: 14, weight: .medium))
+                    Label(L("打开"), systemImage: "arrow.up.forward.square").font(.system(size: 14, weight: .medium))
                         .frame(maxWidth: .infinity).frame(height: 20)
                 }.buttonStyle(FloatingButtonStyle(radius: 18, prominent: true))
                 Button { copyFile(hit) } label: {
-                    Text(copiedFile ? "已复制" : "复制").font(.system(size: 14, weight: .medium))
+                    Text(copiedFile ? L("已复制") : L("复制")).font(.system(size: 14, weight: .medium))
                         .frame(maxWidth: .infinity).frame(height: 20)
                 }
                 .buttonStyle(FloatingButtonStyle(radius: 18))
-                .help("复制文件，可粘贴到访达或其他支持文件的软件")
-                .accessibilityLabel(copiedFile ? "已复制文件" : "复制文件")
+                .help(L("复制文件，可粘贴到访达或其他支持文件的软件"))
+                .accessibilityLabel(copiedFile ? L("已复制文件") : L("复制文件"))
                 PopupButton(actions: [
-                    PopupAction("快速查看") { preview(hit) },
-                    PopupAction("在访达中显示") { model.reveal(hit) },
-                    PopupAction("复制文件") { copyFile(hit) },
-                    PopupAction("复制路径") { copy(hit) },
-                    PopupAction("在终端中打开") { model.openTerminal(hit) }
+                    PopupAction(L("快速查看")) { preview(hit) },
+                    PopupAction(L("在访达中显示")) { model.reveal(hit) },
+                    PopupAction(L("复制文件")) { copyFile(hit) },
+                    PopupAction(L("复制路径")) { copy(hit) },
+                    PopupAction(L("在终端中打开")) { model.openTerminal(hit) }
                 ], chevron: false) {
                     Image(systemName: "ellipsis").frame(width: 18, height: 18)
                         .padding(10).floatingSurface(radius: 19)
-                }.fixedSize().accessibilityLabel("文件操作")
+                }.fixedSize().accessibilityLabel(L("文件操作"))
             }.padding(.top, 4)
         }.padding(compact ? 10 : 14).frame(maxWidth: .infinity)
             .background(AppAppearance.secondary.opacity(0.65), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -133,9 +136,10 @@ struct FileInspector: View {
 
     private func action(_ title: String, symbol: String, perform: @escaping () -> Void) -> some View {
         Button(action: perform) {
-            Label(title, systemImage: symbol).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
+            Label(title, systemImage: symbol).font(.system(size: 12)).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: 16)
-        }.buttonStyle(FloatingButtonStyle(radius: 11))
+        }.buttonStyle(FloatingButtonStyle(radius: 11)).help(title)
     }
 
     private func copy(_ hit: SearchHit) { model.copyPath(hit); copied = true; copiedFile = false }
@@ -148,7 +152,7 @@ struct FileInspector: View {
 @MainActor
 private final class FileDetails: ObservableObject {
     @Published var image: NSImage?
-    @Published var kind = "文件"
+    @Published var kind = L("文件")
     @Published var size: String?
     @Published var created: String?
     @Published var modified: String?
@@ -177,7 +181,7 @@ private final class FileDetails: ObservableObject {
             modified = values.modified?.formatted(SearchFormatting.date)
             accessed = values.accessed?.formatted(SearchFormatting.date)
             tags = values.tags
-        } else { error = "无法读取文件信息，文件可能已移动或没有访问权限。" }
+        } else { error = L("无法读取文件信息，文件可能已移动或没有访问权限。") }
         guard !hit.isDirectory else { return }
         let request = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: 200, height: 200), scale: 2, representationTypes: .thumbnail)
         await withTaskCancellationHandler {

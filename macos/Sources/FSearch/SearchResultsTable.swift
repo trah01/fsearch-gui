@@ -4,6 +4,7 @@ import SwiftUI
 /// Native reusable cells draw only the visible portion of a potentially large
 /// result list. SwiftUI state changes do not reconstruct every result row.
 struct SearchResultsTable: NSViewRepresentable {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject var model: SearchModel
     @ObservedObject private var appearance = AppearanceSettings.shared
     let preview: (SearchHit) -> Void
@@ -43,7 +44,7 @@ struct SearchResultsTable: NSViewRepresentable {
             native.resizingMask = column == .name || column == .path ? [.userResizingMask, .autoresizingMask] : [.userResizingMask]
             if column != .created {
                 native.sortDescriptorPrototype = NSSortDescriptor(key: column.rawValue, ascending: true)
-                native.headerToolTip = "对全部结果排序"
+                native.headerToolTip = L("对全部结果排序")
             }
             table.addTableColumn(native)
         }
@@ -76,6 +77,7 @@ struct SearchResultsTable: NSViewRepresentable {
         private var generation = -1
         private var scrollToTopRevision = -1
         private var theme: ThemeColor?
+        private var languageCode: String?
         private var changingSelection = false
         private var changingSort = false
         private var scrollObserver: NSObjectProtocol?
@@ -105,6 +107,17 @@ struct SearchResultsTable: NSViewRepresentable {
 
         func update() {
             guard let table else { return }
+            if languageCode != Localization.languageCode {
+                languageCode = Localization.languageCode
+                table.menu = makeMenu()
+                for column in table.tableColumns {
+                    column.title = ResultColumn(rawValue: column.identifier.rawValue)?.title ?? ""
+                    column.headerToolTip = L("对全部结果排序")
+                }
+                var visible = IndexSet()
+                table.enumerateAvailableRowViews { _, row in visible.insert(row) }
+                table.reloadData(forRowIndexes: visible, columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+            }
             if table.rowHeight != AppAppearance.rowHeight {
                 table.rowHeight = AppAppearance.rowHeight
                 table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<table.numberOfRows))
@@ -205,7 +218,7 @@ struct SearchResultsTable: NSViewRepresentable {
                 cell.textField?.stringValue = hit.path
                 cell.toolTip = hit.path
             case .size: cell.textField?.stringValue = hit.sizeText
-            case .kind: cell.textField?.stringValue = hit.kindText.replacingOccurrences(of: " 文件", with: "")
+            case .kind: cell.textField?.stringValue = hit.kindText.replacingOccurrences(of: L(" 文件"), with: "")
             case .modified: cell.textField?.stringValue = hit.modified == .distantPast ? "—" : hit.modified.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour().minute())
             case .created:
                 cell.textField?.stringValue = loader.cached(hit)?.createdText ?? hit.createdText
@@ -302,7 +315,7 @@ struct SearchResultsTable: NSViewRepresentable {
 
         func makeMenu() -> NSMenu {
             let menu = NSMenu()
-            for (title, action) in [("打开", #selector(openSelection)), ("快速查看", #selector(previewSelection)), ("在访达中显示", #selector(revealSelection)), ("复制文件", #selector(copyFileSelection)), ("复制路径", #selector(copyPathSelection)), ("在终端中打开", #selector(terminalSelection))] {
+            for (title, action) in [(L("打开"), #selector(openSelection)), (L("快速查看"), #selector(previewSelection)), (L("在访达中显示"), #selector(revealSelection)), (L("复制文件"), #selector(copyFileSelection)), (L("复制路径"), #selector(copyPathSelection)), (L("在终端中打开"), #selector(terminalSelection))] {
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = self
                 menu.addItem(item)
@@ -398,13 +411,13 @@ private final class ResultCell: NSTableCellView {
         }
         var trailing = trailingAnchor
         if column == .modified {
-            let button = NSButton(image: NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "更多文件操作")!, target: self, action: #selector(showMore(_:)))
+            let button = NSButton(image: NSImage(systemSymbolName: "ellipsis", accessibilityDescription: L("更多文件操作"))!, target: self, action: #selector(showMore(_:)))
             button.translatesAutoresizingMaskIntoConstraints = false
             button.isBordered = false
             button.image?.isTemplate = true
             button.contentTintColor = .labelColor
-            button.toolTip = "更多文件操作"
-            button.setAccessibilityLabel("更多文件操作")
+            button.toolTip = L("更多文件操作")
+            button.setAccessibilityLabel(L("更多文件操作"))
             moreButton = button
             addSubview(button)
             NSLayoutConstraint.activate([
@@ -428,6 +441,13 @@ private final class ResultCell: NSTableCellView {
             : (column == .name || column == .path ? AppAppearance.nativeText : AppAppearance.nativeMuted)
         subtitle?.textColor = selected ? secondary : AppAppearance.nativeMuted
         moreButton?.contentTintColor = selected ? foreground : .labelColor
+        if let moreButton {
+            let label = L("更多文件操作")
+            if moreButton.toolTip != label {
+                moreButton.toolTip = label
+                moreButton.setAccessibilityLabel(label)
+            }
+        }
         needsDisplay = true
     }
     @objc private func showMore(_ sender: NSButton) { moreAction?(sender) }

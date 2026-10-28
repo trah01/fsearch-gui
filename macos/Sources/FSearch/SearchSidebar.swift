@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 
 struct SearchSidebar: View {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject var model: SearchModel
     @ObservedObject private var appearance = AppearanceSettings.shared
     @State private var volumes: [URL] = []
@@ -12,42 +13,42 @@ struct SearchSidebar: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(FileCategory.sidebar) { category in
-                    row(category.rawValue, symbol: category.symbol, selected: model.category == category) {
+                    row(category.rawValue.localized, symbol: category.symbol, selected: model.category == category) {
                         model.category = category
                     }
                 }
-                section("位置")
-                row("这台 Mac", symbol: "desktopcomputer", selected: model.scope.isEmpty) { model.scope = "" }
+                section(L("位置"))
+                row(L("这台 Mac"), symbol: "desktopcomputer", selected: model.scope.isEmpty) { model.scope = "" }
                 if FileManager.default.fileExists(atPath: cloud.path) {
-                    row("iCloud 云盘", symbol: "icloud", selected: model.scope == cloud.path) { model.scope = cloud.path }
+                    row(L("iCloud 云盘"), symbol: "icloud", selected: model.scope == cloud.path) { model.scope = cloud.path }
                 }
                 ForEach(volumes, id: \.path) { volume in
                     row(volume.lastPathComponent, symbol: "externaldrive", selected: model.scope == volume.path) {
                         model.scope = volume.path
                     }
                 }
-                row("选择文件夹…", symbol: "folder.badge.plus", selected: false, action: model.chooseFolder)
+                row(L("选择文件夹…"), symbol: "folder.badge.plus", selected: false, action: model.chooseFolder)
                 if !model.scope.isEmpty {
                     HStack(spacing: 6) {
                         Text(model.scope).font(.system(size: 11)).lineLimit(2).truncationMode(.middle).help(model.scope)
                         Button { model.scope = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain).accessibilityLabel("清除位置限制")
+                            .buttonStyle(.plain).accessibilityLabel(L("清除位置限制"))
                     }
                     .foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 6)
                 }
-                section("快捷筛选")
-                row("最近修改", symbol: "clock", selected: model.timeFilter == .week && model.sort?.column == .modified) {
+                section(L("快捷筛选"))
+                row(L("最近修改"), symbol: "clock", selected: model.timeFilter == .week && model.sort?.column == .modified) {
                     model.timeFilter = .week
                     model.setSort(ResultSort(column: .modified, ascending: false))
                 }
-                row("大文件（>100 MB）", symbol: "doc", selected: model.sizeFilter == .large) {
+                row(L("大文件（>100 MB）"), symbol: "doc", selected: model.sizeFilter == .large) {
                     model.sizeFilter = model.sizeFilter == .large ? .any : .large
                 }
-                row("小文件（<1 MB）", symbol: "doc", selected: model.sizeFilter == .small) {
+                row(L("小文件（<1 MB）"), symbol: "doc", selected: model.sizeFilter == .small) {
                     model.sizeFilter = model.sizeFilter == .small ? .any : .small
                 }
                 ForEach([TimeFilter.today, .week, .month]) { filter in
-                    row(filter.rawValue, symbol: "calendar", selected: model.timeFilter == filter) {
+                    row(filter.rawValue.localized, symbol: "calendar", selected: model.timeFilter == filter) {
                         model.timeFilter = model.timeFilter == filter ? .any : filter
                     }
                 }

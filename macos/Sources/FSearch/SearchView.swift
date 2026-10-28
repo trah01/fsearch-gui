@@ -3,6 +3,7 @@ import AppKit
 import QuickLook
 
 struct SearchView: View {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject var model: SearchModel
     @ObservedObject private var appearance = AppearanceSettings.shared
     @State private var searchFocus = 0
@@ -17,9 +18,8 @@ struct SearchView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let sidebarWidth = geometry.size.width < 1100 ? 208 : min(260, geometry.size.width * 0.19)
-            let inspectorWidth: CGFloat = showInspector && geometry.size.width >= 1100
-                ? (geometry.size.width < 1250 ? 264 : min(332, geometry.size.width * 0.23)) : 0
+            let sidebarWidth = SearchWindowLayout.sidebarWidth(for: geometry.size.width)
+            let inspectorWidth = showInspector ? SearchWindowLayout.inspectorWidth(for: geometry.size.width) : 0
             let contentLeadingEdge = showSidebar ? sidebarWidth + 1 : 0
             let contentTrailingEdge = geometry.size.width - (inspectorWidth > 0 ? inspectorWidth + 1 : 0) - 16
             HStack(alignment: .top, spacing: 0) {
@@ -59,6 +59,8 @@ struct SearchView: View {
                             displayControls.fixedSize()
                         }
                     }
+                    .frame(minWidth: 300, maxWidth: .infinity)
+                    .layoutPriority(1)
                 }
             }
         }
@@ -86,29 +88,29 @@ struct SearchView: View {
             Image(systemName: "sidebar.left").font(.system(size: 14, weight: .regular))
         }
         .buttonStyle(WindowToolbarButtonStyle(active: showSidebar))
-        .help(showSidebar ? "隐藏侧边栏" : "显示侧边栏")
-        .accessibilityLabel(showSidebar ? "隐藏侧边栏" : "显示侧边栏")
+        .help(showSidebar ? L("隐藏侧边栏") : L("显示侧边栏"))
+        .accessibilityLabel(showSidebar ? L("隐藏侧边栏") : L("显示侧边栏"))
         .keyboardShortcut("s", modifiers: [.control, .command])
     }
 
     private var windowActions: some View {
         HStack(spacing: 4) {
             PopupButton(actions: [
-                PopupAction("选择搜索文件夹…", perform: model.chooseFolder),
-                PopupAction("清除筛选", perform: model.resetFilters),
+                PopupAction(L("选择搜索文件夹…"), perform: model.chooseFolder),
+                PopupAction(L("清除筛选"), perform: model.resetFilters),
                 .separator,
-                PopupAction("刷新结果", perform: model.search),
-                PopupAction("设置…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
+                PopupAction(L("刷新结果"), perform: model.search),
+                PopupAction(L("设置…")) { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
             ], chevron: false, toolbarControl: true) {
                 Image(systemName: "ellipsis")
             }
             .fixedSize()
-            .help("更多操作")
-            .accessibilityLabel("更多操作")
+            .help(L("更多操作"))
+            .accessibilityLabel(L("更多操作"))
             Button { showInspector.toggle() } label: { Image(systemName: "sidebar.right") }
                 .buttonStyle(WindowToolbarButtonStyle(active: showInspector))
-                .help(showInspector ? "隐藏文件详情" : "显示文件详情")
-                .accessibilityLabel(showInspector ? "隐藏文件详情" : "显示文件详情")
+                .help(showInspector ? L("隐藏文件详情") : L("显示文件详情"))
+                .accessibilityLabel(showInspector ? L("隐藏文件详情") : L("显示文件详情"))
                 .keyboardShortcut("i", modifiers: [.control, .command])
         }
     }
@@ -126,16 +128,16 @@ struct SearchView: View {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(AppAppearance.muted).frame(width: 20, height: 24)
                 }
-                .buttonStyle(.plain).help("清除搜索").accessibilityLabel("清除搜索")
+                .buttonStyle(.plain).help(L("清除搜索")).accessibilityLabel(L("清除搜索"))
             }
             Divider().frame(height: 16).padding(.horizontal, 2)
             Button { showAdvancedFilters.toggle() } label: {
-                Text("高级筛选")
+                Text(L("高级筛选"))
             }
             .buttonStyle(AdvancedSearchButtonStyle(active: model.hasActiveFilters || showAdvancedFilters))
             .fixedSize()
-            .help("设置文件名、类型、大小、修改时间和搜索位置")
-            .accessibilityValue(model.hasActiveFilters ? "已启用筛选" : "未启用筛选")
+            .help(L("设置文件名、类型、大小、修改时间和搜索位置"))
+            .accessibilityValue(model.hasActiveFilters ? L("已启用筛选") : L("未启用筛选"))
             .popover(isPresented: $showAdvancedFilters, arrowEdge: .bottom) {
                 AdvancedSearchView(model: model)
             }
@@ -160,11 +162,11 @@ struct SearchView: View {
                 }
             }
             directoriesFirstButton.fixedSize()
-            PopupButton(actions: sortActions) { Text(model.sort?.column.title ?? "按相关性") }
+            PopupButton(actions: sortActions) { Text(model.sort?.column.title ?? L("按相关性")) }
                 .filterChip(active: false)
                 .fixedSize()
-                .help("对全部结果排序")
-                .accessibilityLabel("排序")
+                .help(L("对全部结果排序"))
+                .accessibilityLabel(L("排序"))
         }
         .frame(height: 44)
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -174,16 +176,16 @@ struct SearchView: View {
         HStack(spacing: 8) {
             scopeButton
             PopupButton(actions: TimeFilter.allCases.map { filter in
-                PopupAction(filter.rawValue, selected: !model.advancedFilters.hasTime && model.timeFilter == filter) { model.timeFilter = filter }
+                PopupAction(filter.rawValue.localized, selected: !model.advancedFilters.hasTime && model.timeFilter == filter) { model.timeFilter = filter }
             }) { Text(model.timeFilterTitle) }
             .filterChip(active: model.timeFilter != .any || model.advancedFilters.hasTime)
             PopupButton(actions: SizeFilter.allCases.map { filter in
-                PopupAction(filter.rawValue, selected: !model.advancedFilters.hasSize && model.sizeFilter == filter) { model.sizeFilter = filter }
+                PopupAction(filter.rawValue.localized, selected: !model.advancedFilters.hasSize && model.sizeFilter == filter) { model.sizeFilter = filter }
             }) { Text(model.sizeFilterTitle) }
             .filterChip(active: model.sizeFilter != .any || model.advancedFilters.hasSize)
             PopupButton(actions: FileCategory.allCases.map { category in
-                PopupAction(category.rawValue, selected: model.category == category) { model.category = category }
-            }) { Text(model.category == .all ? "所有类型" : model.category.rawValue) }
+                PopupAction(category.rawValue.localized, selected: model.category == category) { model.category = category }
+            }) { Text(model.category == .all ? L("所有类型") : model.category.rawValue.localized) }
             .filterChip(active: true, emphasized: true)
             if model.category == .custom {
                 TextField("pdf, docx, xlsx", text: $model.extensions)
@@ -194,7 +196,7 @@ struct SearchView: View {
                     .overlay(RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(extensionsFocused ? AppAppearance.accent : AppAppearance.separator, lineWidth: 1)
                         .allowsHitTesting(false))
-                    .accessibilityLabel("文件后缀，多个用逗号分隔")
+                    .accessibilityLabel(L("文件后缀，多个用逗号分隔"))
                     .onSubmit(model.search)
                     .id("extensions")
             }
@@ -203,24 +205,24 @@ struct SearchView: View {
 
     private var scopeButton: some View {
         PopupButton(actions: [
-            PopupAction("这台 Mac", selected: model.scope.isEmpty) { model.scope = "" },
-            PopupAction("选择文件夹…", perform: model.chooseFolder),
-            PopupAction("输入文件夹路径…") { scopeDraft = model.scope; showScopeEditor = true }
+            PopupAction(L("这台 Mac"), selected: model.scope.isEmpty) { model.scope = "" },
+            PopupAction(L("选择文件夹…"), perform: model.chooseFolder),
+            PopupAction(L("输入文件夹路径…")) { scopeDraft = model.scope; showScopeEditor = true }
         ]) {
-            Text(model.scope.isEmpty ? "这台 Mac" : (model.scope as NSString).lastPathComponent)
+            Text(model.scope.isEmpty ? L("这台 Mac") : (model.scope as NSString).lastPathComponent)
                 .lineLimit(1).truncationMode(.middle).frame(maxWidth: 95)
         }
             .filterChip(active: !model.scope.isEmpty)
-            .help(model.scope.isEmpty ? "搜索所有已建立索引的位置" : model.scope)
+            .help(model.scope.isEmpty ? L("搜索所有已建立索引的位置") : model.scope)
             .popover(isPresented: $showScopeEditor) {
                 VStack(alignment: .leading, spacing: 12) {
-                    TextField("文件夹路径", text: $scopeDraft)
+                    TextField(L("文件夹路径"), text: $scopeDraft)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { model.scope = scopeDraft; showScopeEditor = false }
                     HStack {
-                        Button("选择文件夹…") { showScopeEditor = false; model.chooseFolder() }
+                        Button(L("选择文件夹…")) { showScopeEditor = false; model.chooseFolder() }
                         Spacer()
-                        Button("搜索") { model.scope = scopeDraft; showScopeEditor = false }.keyboardShortcut(.defaultAction)
+                        Button(L("搜索")) { model.scope = scopeDraft; showScopeEditor = false }.keyboardShortcut(.defaultAction)
                     }
                 }.padding(16).frame(width: 360)
             }
@@ -228,7 +230,7 @@ struct SearchView: View {
 
     private var directoriesFirstButton: some View {
         Button { model.setDirectoriesFirst(!model.directoriesFirst) } label: {
-            Text("目录优先").font(.system(size: 12))
+            Text(L("目录优先")).font(.system(size: 12))
                 .foregroundStyle(model.directoriesFirst ? AppAppearance.onAccent : AppAppearance.text)
                 .padding(.horizontal, 10).frame(height: 36)
                 .background(model.directoriesFirst ? AppAppearance.selection : AppAppearance.secondary, in: Capsule())
@@ -236,28 +238,28 @@ struct SearchView: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityValue(model.directoriesFirst ? "开启" : "关闭")
-        .help("将目录排在文件前面")
+        .accessibilityValue(model.directoriesFirst ? L("开启") : L("关闭"))
+        .help(L("将目录排在文件前面"))
     }
 
     private var displayControls: some View {
         HStack(spacing: 8) {
             HStack(spacing: 0) {
-                displayButton("list.bullet", title: "列表视图", selected: !gridView) { gridView = false }
-                displayButton("square.grid.2x2", title: "网格视图", selected: gridView) { gridView = true }
+                displayButton("list.bullet", title: L("列表视图"), selected: !gridView) { gridView = false }
+                displayButton("square.grid.2x2", title: L("网格视图"), selected: gridView) { gridView = true }
             }
         }
     }
 
     private var sortActions: [PopupAction] {
-        var actions = [PopupAction("相关性", selected: model.sort == nil, perform: model.useRelevanceSort), .separator]
+        var actions = [PopupAction(L("相关性"), selected: model.sort == nil, perform: model.useRelevanceSort), .separator]
         actions += [ResultColumn.name, .size, .modified].map { column in
             PopupAction(column.title, selected: model.sort?.column == column) {
                 model.setSort(ResultSort(column: column, ascending: column == .name))
             }
         }
         if let sort = model.sort {
-            actions += [.separator, PopupAction(sort.ascending ? "改为降序" : "改为升序") {
+            actions += [.separator, PopupAction(sort.ascending ? L("改为降序") : L("改为升序")) {
                 model.setSort(ResultSort(column: sort.column, ascending: !sort.ascending))
             }]
         }
@@ -282,14 +284,14 @@ struct SearchView: View {
                     if let error = model.error {
                         Image(systemName: "exclamationmark.triangle").font(.system(size: 26))
                         Text(error).multilineTextAlignment(.center).textSelection(.enabled)
-                        Button("重试", action: model.retrySearch)
+                        Button(L("重试"), action: model.retrySearch)
                     } else if model.busy || model.loadingMore {
                         ProgressView().controlSize(.small)
-                        Text("正在搜索…")
+                        Text(L("正在搜索…"))
                     } else {
                         Image(systemName: "magnifyingglass").font(.system(size: 30, weight: .light))
-                        Text(model.category == .custom && model.extensions.isEmpty ? "请输入文件后缀" : "没有找到匹配的文件")
-                        Button("清除筛选", action: model.resetFilters)
+                        Text(model.category == .custom && model.extensions.isEmpty ? L("请输入文件后缀") : L("没有找到匹配的文件"))
+                        Button(L("清除筛选"), action: model.resetFilters)
                     }
                 }
                 .font(.system(size: 13)).foregroundStyle(.secondary).padding(30).frame(maxWidth: 420)
@@ -300,22 +302,22 @@ struct SearchView: View {
     private var statusBar: some View {
         HStack(spacing: 10) {
             if model.busy || model.sorting || model.preparingSort || model.loadingMore { ProgressView().controlSize(.mini) }
-            if model.preparingSort { Text("正在准备排序索引…") }
-            else if model.sorting { Text("正在排序…") }
+            if model.preparingSort { Text(L("正在准备排序索引…")) }
+            else if model.sorting { Text(L("正在排序…")) }
             if !model.busy {
                 if model.loadingMode == .onDemand && model.hasMore {
-                    Text("已加载 \(model.hits.count) 项")
-                } else { Text("共 \(model.hits.count) 项") }
+                    Text(L("已加载 \(String(describing: model.hits.count)) 项"))
+                } else { Text(L("共 \(String(describing: model.hits.count)) 项")) }
             }
-            if model.loadingMore { Text("正在加载更多…") }
+            if model.loadingMore { Text(L("正在加载更多…")) }
             if !model.elapsed.isEmpty { Text(model.elapsed).foregroundStyle(.tertiary) }
             if let error = model.error, !model.hits.isEmpty {
                 Text(error).lineLimit(1).help(error)
-                Button("重试", action: model.retrySearch)
+                Button(L("重试"), action: model.retrySearch)
             }
             Spacer(minLength: 0)
             if model.selectedHit != nil {
-                Button("快速查看") { if let hit = model.selectedHit { preview(hit) } }
+                Button(L("快速查看")) { if let hit = model.selectedHit { preview(hit) } }
             }
         }
         .font(.system(size: 11)).foregroundStyle(.secondary).buttonStyle(.borderless)

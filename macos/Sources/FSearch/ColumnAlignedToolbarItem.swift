@@ -15,19 +15,19 @@ struct ColumnAlignedToolbarItem<Content: View>: NSViewRepresentable {
 
     func updateNSView(_ view: ColumnToolbarContainer<Content>, context: Context) {
         view.host.rootView = content
-        view.leadingEdge = leadingEdge
-        view.trailingEdge = trailingEdge
-        view.contentHeight = height
-        view.needsLayout = true
-        view.invalidateIntrinsicContentSize()
+        view.updateGeometry(leadingEdge: leadingEdge, trailingEdge: trailingEdge, height: height)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ColumnToolbarContainer<Content>, context: Context) -> CGSize? {
-        nsView.intrinsicContentSize
+        let preferred = nsView.intrinsicContentSize
+        let width = proposal.width.map { min(preferred.width, max(ColumnToolbarContainer<Content>.minimumWidth, $0)) }
+            ?? preferred.width
+        return CGSize(width: width, height: height)
     }
 }
 
 final class ColumnToolbarContainer<Content: View>: NSView {
+    static var minimumWidth: CGFloat { 300 }
     let host: NSHostingView<Content>
     var leadingEdge: CGFloat
     var trailingEdge: CGFloat
@@ -44,27 +44,49 @@ final class ColumnToolbarContainer<Content: View>: NSView {
         self.trailingEdge = trailingEdge
         contentHeight = height
         super.init(frame: .zero)
+        // This host is framed manually; its SwiftUI content must not change
+        // the outer toolbar item's intrinsic size on every search update.
+        host.sizingOptions = []
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(host)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    func updateGeometry(leadingEdge: CGFloat, trailingEdge: CGFloat, height: CGFloat) {
+        guard abs(self.leadingEdge - leadingEdge) > 0.5 || abs(self.trailingEdge - trailingEdge) > 0.5
+                || self.contentHeight != height else { return }
+        let previousSize = intrinsicContentSize
+        self.leadingEdge = leadingEdge
+        self.trailingEdge = trailingEdge
+        contentHeight = height
+        needsLayout = true
+        if intrinsicContentSize != previousSize { invalidateIntrinsicContentSize() }
+    }
+
     override var intrinsicContentSize: NSSize {
-        NSSize(width: leadingSpace + contentWidth, height: contentHeight)
+        // Before attachment the toolbar origin is unknown. Asking for the
+        // entire window here can overflow the item before it is ever laid out.
+        NSSize(width: measuredOrigin == nil ? Self.minimumWidth : max(Self.minimumWidth, leadingSpace + contentWidth),
+               height: contentHeight)
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        needsLayout = true
+        if window != nil { needsLayout = true }
     }
 
     override func layout() {
         super.layout()
-        let currentOrigin = window == nil ? leadingEdge : convert(.zero, to: nil).x
-        if measuredOrigin == nil || abs(currentOrigin - origin) > 0.5 {
+        let currentOrigin = convert(.zero, to: nil).x
+        if window != nil && (measuredOrigin == nil || abs(currentOrigin - origin) > 0.5) {
             measuredOrigin = currentOrigin
             invalidateIntrinsicContentSize()
         }
-        host.frame = NSRect(x: leadingSpace, y: max(0, (bounds.height - contentHeight) / 2), width: contentWidth, height: contentHeight)
+        let inset = min(leadingSpace, max(0, bounds.width - Self.minimumWidth))
+        let width = max(0, min(contentWidth, bounds.width - inset))
+        let frame = NSRect(x: inset, y: max(0, (bounds.height - contentHeight) / 2), width: width, height: contentHeight)
+        if host.frame != frame { host.frame = frame }
     }
 }

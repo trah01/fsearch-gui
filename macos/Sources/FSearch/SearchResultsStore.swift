@@ -4,12 +4,12 @@ enum ResultColumn: String, CaseIterable, Sendable {
     case name, path, kind, size, modified, created
     var title: String {
         switch self {
-        case .name: return "文件名"
-        case .path: return "路径"
-        case .kind: return "种类"
-        case .size: return "大小"
-        case .modified: return "修改时间"
-        case .created: return "创建时间"
+        case .name: return L("文件名")
+        case .path: return L("路径")
+        case .kind: return L("种类")
+        case .size: return L("大小")
+        case .modified: return L("修改时间")
+        case .created: return L("创建时间")
         }
     }
 }

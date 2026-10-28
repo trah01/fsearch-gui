@@ -1,0 +1,2 @@
+"NSRemovableVolumesUsageDescription" = "FSearch 需要读取外置硬盘中的文件名，以建立文件搜索索引。";
+"NSNetworkVolumesUsageDescription" = "FSearch 需要读取已连接网络磁盘中的文件名，以便搜索文件。";

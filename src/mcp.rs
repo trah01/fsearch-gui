@@ -124,7 +124,7 @@ impl Session {
                     json!({
                         "protocolVersion": version,
                         "capabilities": {"tools": {}},
-                        "serverInfo": {"name": "fsearch", "version": env!("CARGO_PKG_VERSION")},
+                        "serverInfo": {"name": "fsearch", "version": env!("FSEARCH_VERSION")},
                         "instructions": INSTRUCTIONS,
                     }),
                 )

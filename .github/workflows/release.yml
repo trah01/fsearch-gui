@@ -1,6 +1,4 @@
-# Push a tag like v0.1.0 to build fsearch and attach it to the tag's GitHub
-# release, made here if it isn't already. Run it by hand to build an older tag.
-name: release
+name: 构建并发布 macOS 应用
 
 on:
   push:
@@ -8,29 +6,114 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag to build
-        required: true
+        description: 要构建的 v* 标签；留空使用所选分支的 VERSION
+        required: false
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: macos-release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      FSEARCH_UNIVERSAL: "1"
+      RUSTUP_TOOLCHAIN: stable
+      FSEARCH_GITHUB_REPOSITORY: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v7
+      - name: 检出源码
+        uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
-      # .cargo/config.toml targets the build machine's CPU; target every Apple Silicon Mac instead.
-      - run: cargo build --release --locked
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: 校验版本
         env:
-          RUSTFLAGS: -C target-cpu=apple-m1
-      - run: |
-          tar -czf fsearch-aarch64-apple-darwin.tar.gz -C target/release fsearch
-          shasum -a 256 fsearch-aarch64-apple-darwin.tar.gz > fsearch-aarch64-apple-darwin.tar.gz.sha256
-          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --generate-notes
-          gh release upload "$TAG" --clobber fsearch-aarch64-apple-darwin.tar.gz fsearch-aarch64-apple-darwin.tar.gz.sha256
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="$(python3 scripts/project_config.py version)"
+          TAG="v$VERSION"
+          if [ -n "$INPUT_TAG" ]; then
+            python3 scripts/project_config.py version --tag "$INPUT_TAG"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            python3 scripts/project_config.py version --tag "$GITHUB_REF_NAME"
+          fi
+          BUILD_COMMIT="$(git rev-parse HEAD)"
+          if git rev-parse --verify "refs/tags/$TAG^{commit}" >/dev/null 2>&1; then
+            if [ "$(git rev-parse "refs/tags/$TAG^{commit}")" != "$BUILD_COMMIT" ]; then
+              echo '当前提交与已有版本标签不一致，请更新 VERSION 后发布新版本。' >&2
+              exit 1
+            fi
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "BUILD_COMMIT=$BUILD_COMMIT" >> "$GITHUB_ENV"
+
+      - name: 准备 Rust 工具链
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add --toolchain stable aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: 缓存构建依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            macos/.build
+          key: macos-universal-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'macos/Package.swift', '.cargo/config.toml') }}
+          restore-keys: |
+            macos-universal-${{ runner.arch }}-
+
+      - name: 编译 Apple Silicon 和 Intel 通用应用
+        run: bash scripts/build-app.sh
+
+      - name: 生成 ZIP 和 DMG 安装包
+        run: bash scripts/package-release.sh
+
+      - name: 校验安装包
+        run: |
+          set -euo pipefail
+          cd build/release
+          shasum -a 256 -c "FSearch-$VERSION-universal.sha256"
+
+      - name: 发布 GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft > "$RUNNER_TEMP/release-draft" 2>/dev/null; then
+            if [ "$(cat "$RUNNER_TEMP/release-draft")" != true ]; then
+              echo '该版本已经发布，请递增 VERSION，避免替换用户已下载的更新包。' >&2
+              exit 1
+            fi
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$BUILD_COMMIT" \
+              --title "FSearch $VERSION" --generate-notes --draft
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            "build/release/FSearch-$VERSION-universal.zip" \
+            "build/release/FSearch-$VERSION-universal.dmg" \
+            "build/release/FSearch-$VERSION-universal.sha256"
+          LATEST_TAG="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)"
+          export LATEST_TAG
+          PROMOTE="$(python3 - <<'PY'
+          import os
+          import re
+          def version(tag):
+              return tuple(map(int, tag.removeprefix('v').split('.')))
+          latest = os.environ['LATEST_TAG']
+          valid = re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', latest)
+          print('true' if not valid or version(os.environ['TAG']) > version(latest) else 'false')
+          PY
+          )"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$PROMOTE"

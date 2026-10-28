@@ -1,7 +1,9 @@
 target/
 build/
+/.build/
 macos/.build/
 macos/.swiftpm/
 .probe/
 .livetest/
 .replaytest/
+docs/发布与更新.md

@@ -27,5 +27,5 @@ enum SearchBinaryRows {
         }
     }
 
-    private static var invalidResponse: ClientError { .message("搜索服务返回了无法识别的数据。") }
+    private static var invalidResponse: ClientError { .message(L("搜索服务返回了无法识别的数据。")) }
 }

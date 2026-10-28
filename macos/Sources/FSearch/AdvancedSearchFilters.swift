@@ -48,14 +48,14 @@ struct AdvancedSearchFilters: Codable, Equatable {
             case .regularExpression: pattern = name
             }
             do { _ = try NSRegularExpression(pattern: pattern) }
-            catch { throw ClientError.message("文件名的正则表达式不正确，请检查后重试。") }
+            catch { throw ClientError.message(L("文件名的正则表达式不正确，请检查后重试。")) }
             fields["re"] = pattern
         }
         if hasSize {
             let minimum = try sizeValue(minimumSize)
             let maximum = try sizeValue(maximumSize)
             if let minimum, let maximum, minimum > maximum {
-                throw ClientError.message("最小大小不能大于最大大小。")
+                throw ClientError.message(L("最小大小不能大于最大大小。"))
             }
             if let minimum, let maximum { fields["size"] = "\(minimum)..\(maximum)" }
             else if let minimum { fields["size"] = ">=\(minimum)" }
@@ -63,7 +63,7 @@ struct AdvancedSearchFilters: Codable, Equatable {
         }
         if hasTime {
             guard let days = Int(modifiedDays.trimmingCharacters(in: .whitespaces)), (1...36500).contains(days) else {
-                throw ClientError.message("修改时间请输入 1 到 36500 之间的天数。")
+                throw ClientError.message(L("修改时间请输入 1 到 36500 之间的天数。"))
             }
             fields["mtime"] = "<\(days)d"
         }
@@ -74,7 +74,7 @@ struct AdvancedSearchFilters: Codable, Equatable {
         let parts = text.lowercased().components(separatedBy: CharacterSet(charactersIn: ",，;； ").union(.whitespacesAndNewlines))
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".")) }.filter { !$0.isEmpty }
         guard !parts.isEmpty, parts.allSatisfy({ $0.range(of: "^[a-z0-9_+-]+$", options: .regularExpression) != nil }) else {
-            throw ClientError.message("请输入有效的文件后缀，多个后缀用逗号分隔。")
+            throw ClientError.message(L("请输入有效的文件后缀，多个后缀用逗号分隔。"))
         }
         return Array(Set(parts)).sorted().joined(separator: ",")
     }
@@ -83,7 +83,7 @@ struct AdvancedSearchFilters: Codable, Equatable {
         let text = text.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
         guard let value = Double(text), value.isFinite, value >= 0, value * sizeUnit.multiplier < Double(UInt64.max) else {
-            throw ClientError.message("文件大小请输入有效的非负数。")
+            throw ClientError.message(L("文件大小请输入有效的非负数。"))
         }
         return UInt64(value * sizeUnit.multiplier)
     }

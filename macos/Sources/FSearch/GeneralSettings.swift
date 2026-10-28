@@ -8,10 +8,10 @@ enum SearchHotKey: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .disabled: return "关闭"
-        case .optionSpace: return "⌥ 空格"
-        case .controlOptionSpace: return "⌃ ⌥ 空格"
-        case .commandShiftSpace: return "⇧ ⌘ 空格"
+        case .disabled: return L("关闭")
+        case .optionSpace: return L("⌥ 空格")
+        case .controlOptionSpace: return L("⌃ ⌥ 空格")
+        case .commandShiftSpace: return L("⇧ ⌘ 空格")
         }
     }
     var modifiers: UInt32 {
@@ -45,12 +45,12 @@ private final class GlobalSearchHotKey {
                 Task { @MainActor in GlobalSearchHotKey.shared.action?() }
                 return noErr
             }, 1, &event, nil, &handler)
-            guard status == noErr else { throw ClientError.message("无法启用全局快捷键，请重新打开应用后重试。") }
+            guard status == noErr else { throw ClientError.message(L("无法启用全局快捷键，请重新打开应用后重试。")) }
         }
         var registered: EventHotKeyRef?
         let identifier = EventHotKeyID(signature: 0x46535243, id: 1)
         let status = RegisterEventHotKey(UInt32(kVK_Space), choice.modifiers, identifier, GetApplicationEventTarget(), 0, &registered)
-        guard status == noErr else { throw ClientError.message("此快捷键已被占用，请选择其他组合。") }
+        guard status == noErr else { throw ClientError.message(L("此快捷键已被占用，请选择其他组合。")) }
         if let hotKey { UnregisterEventHotKey(hotKey) }
         hotKey = registered
     }
@@ -99,40 +99,41 @@ final class GeneralSettings: ObservableObject {
             if value { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
             error = nil
-        } catch { self.error = "无法修改登录启动设置：\(error.localizedDescription)" }
+        } catch { self.error = L("无法修改登录启动设置：\(String(describing: error.localizedDescription))") }
         refreshLoginStatus()
     }
 }
 
 struct GeneralSettingsView: View {
+    @ObservedObject private var language = LanguageSettings.shared
     @ObservedObject private var settings = GeneralSettings.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         SettingsPane {
             VStack(spacing: 12) {
-                SettingsRow("全局搜索快捷键") {
-                    Picker("全局搜索快捷键", selection: Binding(get: { settings.hotKey }, set: settings.setHotKey)) {
+                SettingsRow(L("全局搜索快捷键")) {
+                    Picker(L("全局搜索快捷键"), selection: Binding(get: { settings.hotKey }, set: settings.setHotKey)) {
                         ForEach(SearchHotKey.allCases) { Text($0.title).tag($0) }
                     }.labelsHidden().frame(width: 180)
                 }
-                SettingsRow("登录时启动") {
-                    Toggle("登录时启动", isOn: Binding(get: { settings.loginEnabled }, set: settings.setLoginEnabled))
+                SettingsRow(L("登录时启动")) {
+                    Toggle(L("登录时启动"), isOn: Binding(get: { settings.loginEnabled }, set: settings.setLoginEnabled))
                         .labelsHidden().toggleStyle(.switch)
                 }
                 if settings.loginNeedsApproval {
                     HStack {
-                        SettingsNote("请在系统设置中允许 FSearch 登录时启动。")
+                        SettingsNote(L("请在系统设置中允许 FSearch 登录时启动。"))
                         Spacer()
-                        Button("打开系统设置") { SMAppService.openSystemSettingsLoginItems() }
+                        Button(L("打开系统设置")) { SMAppService.openSystemSettingsLoginItems() }
                     }
                 }
             }
             Divider()
-            SettingsRow("关闭窗口后") {
-                Picker("关闭窗口后", selection: $settings.quitWhenClosed) {
-                    Text("保持后台运行").tag(false)
-                    Text("退出应用").tag(true)
+            SettingsRow(L("关闭窗口后")) {
+                Picker(L("关闭窗口后"), selection: $settings.quitWhenClosed) {
+                    Text(L("保持后台运行")).tag(false)
+                    Text(L("退出应用")).tag(true)
                 }.labelsHidden().frame(width: 180)
             }
             if let error = settings.error {

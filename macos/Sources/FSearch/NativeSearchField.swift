@@ -4,6 +4,7 @@ import AppKit
 /// A native single-line editor with composition-aware text synchronization.
 /// Search and clear icons live outside this view so they cannot overlap its editor.
 struct NativeSearchField: NSViewRepresentable {
+    @ObservedObject private var language = LanguageSettings.shared
     @Binding var text: String
     let focus: Int
     let compositionChanged: (Bool) -> Void
@@ -30,18 +31,19 @@ struct NativeSearchField: NSViewRepresentable {
         field.focusRingType = .none
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        field.setAccessibilityLabel("搜索")
+        field.setAccessibilityLabel(L("搜索"))
         return field
     }
 
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.parent = self
+        field.setAccessibilityLabel(L("搜索"))
         let composing = (field.currentEditor() as? NSTextView)?.hasMarkedText() == true
         if !composing && field.stringValue != text { field.stringValue = text }
-        field.placeholderString = "搜索文件或文件夹…"
-        field.placeholderAttributedString = NSAttributedString(string: "搜索文件或文件夹…",
+        field.placeholderString = L("搜索文件或文件夹…")
+        field.placeholderAttributedString = NSAttributedString(string: L("搜索文件或文件夹…"),
             attributes: [.foregroundColor: AppAppearance.nativeMuted, .font: NSFont.systemFont(ofSize: AppAppearance.searchFontSize)])
-        field.toolTip = "空格：同时匹配；!：排除；'：精确匹配；* / ?：通配符；ext:pdf：后缀；size:>1GB：大小；mtime:<7d：最近修改"
+        field.toolTip = L("空格：同时匹配；!：排除；'：精确匹配；* / ?：通配符；ext:pdf：后缀；size:>1GB：大小；mtime:<7d：最近修改")
         if context.coordinator.lastFocus != focus {
             context.coordinator.lastFocus = focus
             DispatchQueue.main.async {
