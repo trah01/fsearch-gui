@@ -21,7 +21,8 @@ struct SearchView: View {
             let sidebarWidth = SearchWindowLayout.sidebarWidth(for: geometry.size.width)
             let inspectorWidth = showInspector ? SearchWindowLayout.inspectorWidth(for: geometry.size.width) : 0
             let contentLeadingEdge = showSidebar ? sidebarWidth + 1 : 0
-            let contentTrailingEdge = geometry.size.width - (inspectorWidth > 0 ? inspectorWidth + 1 : 0) - 16
+            let contentWidth = max(0, geometry.size.width - contentLeadingEdge - (inspectorWidth > 0 ? inspectorWidth + 1 : 0))
+            let contentTrailingEdge = contentLeadingEdge + contentWidth - 16
             HStack(alignment: .top, spacing: 0) {
                 if showSidebar {
                     SearchSidebar(model: model)
@@ -35,7 +36,8 @@ struct SearchView: View {
                     Divider()
                     statusBar
                 }
-                .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(width: contentWidth)
+                .frame(maxHeight: .infinity)
                 .background(AppAppearance.panel)
                 if inspectorWidth > 0 {
                     Divider()
@@ -162,11 +164,6 @@ struct SearchView: View {
                 }
             }
             directoriesFirstButton.fixedSize()
-            PopupButton(actions: sortActions) { Text(model.sort?.column.title ?? L("按相关性")) }
-                .filterChip(active: false)
-                .fixedSize()
-                .help(L("对全部结果排序"))
-                .accessibilityLabel(L("排序"))
         }
         .frame(height: 44)
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -249,21 +246,6 @@ struct SearchView: View {
                 displayButton("square.grid.2x2", title: L("网格视图"), selected: gridView) { gridView = true }
             }
         }
-    }
-
-    private var sortActions: [PopupAction] {
-        var actions = [PopupAction(L("相关性"), selected: model.sort == nil, perform: model.useRelevanceSort), .separator]
-        actions += [ResultColumn.name, .size, .modified].map { column in
-            PopupAction(column.title, selected: model.sort?.column == column) {
-                model.setSort(ResultSort(column: column, ascending: column == .name))
-            }
-        }
-        if let sort = model.sort {
-            actions += [.separator, PopupAction(sort.ascending ? L("改为降序") : L("改为升序")) {
-                model.setSort(ResultSort(column: sort.column, ascending: !sort.ascending))
-            }]
-        }
-        return actions
     }
 
     private func displayButton(_ symbol: String, title: String, selected: Bool, action: @escaping () -> Void) -> some View {

@@ -17,7 +17,7 @@ struct SearchResultsTable: NSViewRepresentable {
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = true
-        scroll.scrollerStyle = .legacy
+        scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.contentView.drawsBackground = false
@@ -28,7 +28,7 @@ struct SearchResultsTable: NSViewRepresentable {
         table.intercellSpacing = NSSize(width: 6, height: 0)
         table.usesAlternatingRowBackgroundColors = false
         table.backgroundColor = .clear
-        table.headerView = nil
+        table.headerView = NSTableHeaderView()
         table.allowsMultipleSelection = false
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         for column in [ResultColumn.name, .kind, .size, .modified] {
@@ -64,6 +64,11 @@ struct SearchResultsTable: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.preview = preview
         context.coordinator.update()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
+        // Column widths belong to the scrollable document, not the pane's layout.
+        proposal.replacingUnspecifiedDimensions()
     }
 
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) { coordinator.stop() }
