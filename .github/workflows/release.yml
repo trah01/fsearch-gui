@@ -85,6 +85,7 @@ jobs:
           set -euo pipefail
           cd build/release
           shasum -a 256 -c "FSearch-gui-$VERSION-universal.sha256"
+          shasum -a 256 -c "FSearch-$VERSION-universal.sha256"
 
       - name: 发布 GitHub Release
         env:
@@ -103,7 +104,9 @@ jobs:
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             "build/release/FSearch-gui-$VERSION-universal.zip" \
             "build/release/FSearch-gui-$VERSION-universal.dmg" \
-            "build/release/FSearch-gui-$VERSION-universal.sha256"
+            "build/release/FSearch-gui-$VERSION-universal.sha256" \
+            "build/release/FSearch-$VERSION-universal.zip" \
+            "build/release/FSearch-$VERSION-universal.sha256"
           LATEST_TAG="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)"
           export LATEST_TAG
           PROMOTE="$(python3 - <<'PY'

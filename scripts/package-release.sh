@@ -31,5 +31,9 @@ hdiutil create -volname "FSearch-gui $VERSION" -srcfolder "$DMG_STAGE" -ov -form
 (
     cd "$DIST_DIR"
     shasum -a 256 "$ASSET.zip" "$ASSET.dmg" > "$ASSET.sha256"
+    # 0.1.0 及更早版本只识别 FSearch-<版本>-<架构>.zip，保留旧名更新包以便旧客户端升级。
+    LEGACY_ASSET="FSearch-$VERSION-$ARCH"
+    cp "$ASSET.zip" "$LEGACY_ASSET.zip"
+    shasum -a 256 "$LEGACY_ASSET.zip" > "$LEGACY_ASSET.sha256"
 )
 printf '已打包：%s/%s.zip\n%s/%s.dmg\n' "$DIST_DIR" "$ASSET" "$DIST_DIR" "$ASSET"
